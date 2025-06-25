@@ -124,36 +124,78 @@ class ParsedFSKLData:
     root_indices: list[int] | None = None
     bones: list[ParsedBoneData] | None = None
 
-def find_texture_folder(fmod_path: str) -> str:
-    # Look if we have any directory present in the fmod path folder
+def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
+    def contains_images(folder_path: str) -> bool:
+        """Check if a folder contains image files"""
+        if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
+            return False
+        
+        image_extensions = {'.png', '.jpg', '.jpeg', '.tga', '.dds', '.bmp', '.tiff'}
+        try:
+            items = os.listdir(folder_path)
+            for item in items:
+                if os.path.isfile(os.path.join(folder_path, item)):
+                    _, ext = os.path.splitext(item.lower())
+                    if ext in image_extensions:
+                        return True
+        except OSError:
+            pass
+        return False
+    
+    # Get the directory containing the fmod file and the filename
     fmod_dir = os.path.dirname(fmod_path)
-    items = os.listdir(fmod_dir)
-    directories = [item for item in items if os.path.isdir(os.path.join(fmod_dir, item))]
-    if directories:
-        # If we have directories, return the one that start with "0003"
-        for directory in directories:
-            if directory.startswith("0003"):
-                return os.path.join(fmod_dir, directory)
+    fmod_filename = os.path.basename(fmod_path)
     
-    # If there's not check if the fmod directory name starts with "0001"
-    if os.path.basename(fmod_dir).startswith("0001"):
-        # if so look one directory up for a directory that starts with "0002"
-        parent_dir = os.path.dirname(fmod_dir)
-        parent_items = os.listdir(parent_dir)
-        parent_directories = [item for item in parent_items if os.path.isdir(os.path.join(parent_dir, item))]
-        for directory in parent_directories:
-            if directory.startswith("0002"):
-                return os.path.join(parent_dir, directory)
+    # Step 1: Extract first 3 characters of fmod filename and parse as number
+    try:
+        fmod_number = int(fmod_filename[:4])
+    except (ValueError, IndexError):
+        return None
     
-    # If the fmod directory starts with "0004" instead look for a directory that starts with "0005"
-    if os.path.basename(fmod_dir).startswith("0004"):
-        parent_dir = os.path.dirname(fmod_dir)
-        parent_items = os.listdir(parent_dir)
-        parent_directories = [item for item in parent_items if os.path.isdir(os.path.join(parent_dir, item))]
-        for directory in parent_directories:
-            if directory.startswith("0005"):
-                return os.path.join(parent_dir, directory)
 
+    print(f"fmod number {fmod_number}")
+
+    # Step 2: Look for folder with name starting with fmod_number + 2
+    target_number = fmod_number + 2
+    target_prefix = f"{target_number:04d}"  # Pad to 3 digits with leading zeros
+    
+    print(f"target_prefix {target_prefix}")
+
+    # Check directories in the same folder as the fmod file
+    try:
+        items = os.listdir(fmod_dir)
+        for item in items:
+            if os.path.isdir(os.path.join(fmod_dir, item)) and item.startswith(target_prefix):
+                candidate_path = os.path.join(fmod_dir, item)
+                if contains_images(candidate_path):
+                    return candidate_path
+    except OSError:
+        pass
+    
+    # Step 3: If not found, check the containing folder name
+    fmod_dir_name = os.path.basename(fmod_dir)
+    try:
+        containing_folder_number = int(fmod_dir_name[:4])
+    except (ValueError, IndexError):
+        return None
+    
+    # Look for folder with name starting with containing_folder_number + 1
+    target_number = containing_folder_number + 1
+    target_prefix = f"{target_number:04d}"  # Pad to 3 digits with leading zeros
+    
+    # Check directories in the parent folder
+    parent_dir = os.path.dirname(fmod_dir)
+    try:
+        parent_items = os.listdir(parent_dir)
+        for item in parent_items:
+            if os.path.isdir(os.path.join(parent_dir, item)) and item.startswith(target_prefix):
+                candidate_path = os.path.join(parent_dir, item)
+                if contains_images(candidate_path):
+                    return candidate_path
+    except OSError:
+        pass
+    
+    # Return None if no texture folder found
     return None
 
 def find_fskl_file(fmod_path: str) -> str:
@@ -485,7 +527,6 @@ def create_blender_material(mat_name: str, parsed_material: ParsedMaterialData, 
     mat.use_nodes = True
 
     mat.blend_method = 'HASHED'
-    mat.shadow_method = 'HASHED'
 
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
@@ -1015,7 +1056,7 @@ class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
     def execute(self, context):
         # Get the file path
         filepath = self.filepath
-        texture_folder = find_texture_folder(filepath)
+        texture_folder = find_texture_folder(filepath, "")
         skeleton_path = find_fskl_file(filepath)
 
         if not texture_folder:
