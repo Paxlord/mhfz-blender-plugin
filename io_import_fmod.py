@@ -388,6 +388,26 @@ def create_optimized_strips(triangles: list[list[int]], material_indices: list[i
     
     return strips, strip_material_indices
 
+def create_simple_strips(triangles: list[list[int]], material_indices: list[int], material_list: list[int]) -> tuple[list[list[int]], list[int]]:
+    strips = []
+    strip_material_indices = []
+    
+    # Ensure material_list contains all used materials
+    for mat_idx in material_indices:
+        if mat_idx not in material_list:
+            material_list.append(mat_idx)
+    
+    for i, triangle in enumerate(triangles):
+        # Each triangle becomes its own strip
+        strips.append(triangle)
+        
+        # Map material index to palette index
+        mat_idx = material_indices[i]
+        palette_idx = material_list.index(mat_idx)
+        strip_material_indices.append(palette_idx)
+    
+    return strips, strip_material_indices
+
 def parent_mesh_to_armature(mesh_obj, armature_obj):
     """Parent a mesh object to an armature object and add an armature modifier."""
     # Add an armature modifier
@@ -1041,6 +1061,37 @@ def parse_directory(buf, off, fmod_data: ParsedFMODData):
         texture_data = parse_texture_directory(buf, off)
         fmod_data.textures.extend(texture_data)
 
+def load_texture_no_dupes(parsed_fmod_data, texture_folder):
+    files = sorted([f for f in os.listdir(texture_folder) if os.path.isfile(os.path.join(texture_folder, f))])
+    
+    file_to_image = {}
+    texture_dic = {}
+    
+    for i, texture in enumerate(parsed_fmod_data.textures):
+        file_path = os.path.join(texture_folder, files[texture.image_idx])
+        
+        try:
+            if file_path not in file_to_image:
+                img = bpy.data.images.load(file_path)
+                file_to_image[file_path] = img
+                print(f"Loaded new texture: {img.name} from {file_path}")
+            else:
+                img = file_to_image[file_path]
+                print(f"Reusing texture: {img.name} for slot {i}")
+            
+            texture_dic[i] = img
+            
+        except Exception as e:
+            print(f"Failed to load texture {file_path}: {e}")
+            continue
+    
+    print(f"Texture summary:")
+    print(f"  - {len(texture_dic)} texture slots")
+    print(f"  - {len(file_to_image)} unique texture files")
+    print(f"  - {len(set(texture_dic.values()))} unique image objects")
+    
+    return texture_dic
+
 class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
     """Import FMOD model"""
     bl_idname = "import_scene.fmod"
@@ -1096,19 +1147,7 @@ class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
                 print(f"Parsed skeleton data: {len(parsed_skeleton_data.bones)} bones")
 
             
-            texture_dic = {}
-            files = sorted([f for f in os.listdir(texture_folder) if os.path.isfile(os.path.join(texture_folder, f))])
-            for i, texture in enumerate(parsed_fmod_data.textures):
-                file_path = os.path.join(texture_folder, files[texture.image_idx])
-                try:
-                    img = bpy.data.images.load(file_path)
-                    texture_dic[i] = img
-                except Exception as e:
-                    print(f"Failed to load texture {file_path}: {e}")
-                    continue
-            print("Loaded textures successfully")
-
-            print(f"Texture dictionary: {texture_dic}")
+            texture_dic = load_texture_no_dupes(parsed_fmod_data, texture_folder)
 
             blender_materials = []
             for i, material in enumerate(parsed_fmod_data.materials):
@@ -1382,7 +1421,7 @@ def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str]) -> Pars
     strips = []
     strip_material_indices = []
 
-    strips, strip_material_indices = create_optimized_strips(triangles, face_materials, material_list)
+    strips, strip_material_indices = create_simple_strips(triangles, face_materials, material_list)
 
     mesh_data.faces = strips
     mesh_data.material_list = material_list
@@ -1925,7 +1964,17 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
             texture_name = f"{padded_index}_{padded_hex}.png"
             texture_path = os.path.join(texture_directory_path, texture_name)
             try:
-                texture.save_render(filepath=texture_path, scene=context.scene)
+                temp_scene = bpy.data.scenes.new("RGB_Export")
+                
+                temp_scene.render.image_settings.file_format = 'PNG'
+                temp_scene.render.image_settings.color_mode = 'RGB'  
+                temp_scene.render.image_settings.color_depth = '8'
+                temp_scene.render.image_settings.compression = 15
+                
+                texture.save_render(filepath=texture_path, scene=temp_scene)
+                
+                bpy.data.scenes.remove(temp_scene)
+        
                 texture_file_names.append(texture_name)
                 print(f"Exported texture {texture.name} to {texture_path}")
             except Exception as e:
