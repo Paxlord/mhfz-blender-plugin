@@ -8,15 +8,142 @@ bl_info = {
     "location": "File > Import > FMOD (.fmod)",
 }
 
-import bpy
-import bpy_extras.io_utils
-import bmesh
+import bpy # type: ignore
+import bpy_extras.io_utils # type: ignore
+import bmesh # type: ignore
 import struct
 import os
 from dataclasses import dataclass
-from mathutils import Matrix, Vector, Euler
+from mathutils import Matrix, Vector # type: ignore
 import math
 import random
+import collections
+
+class AdjTriangle:
+    def __init__(self, v0, v1, v2, face_index):
+        self.v_ref = (v0, v1, v2)
+        self.face_index = face_index
+        self.adj_tri = [None, None, None]
+    def __repr__(self):
+        return f"Face {self.face_index}: V({self.v_ref}), Adj({self.adj_tri})"
+    def find_edge_index(self, v_a, v_b):
+        v0, v1, v2 = self.v_ref
+        if (v_a == v0 and v_b == v1) or (v_a == v1 and v_b == v0): return 0
+        if (v_a == v0 and v_b == v2) or (v_a == v2 and v_b == v0): return 1
+        if (v_a == v1 and v_b == v2) or (v_a == v2 and v_b == v1): return 2
+        raise ValueError(f"Edge ({v_a}, {v_b}) not found in triangle {self.v_ref}")
+    def opposite_vertex(self, v_a, v_b):
+        for v in self.v_ref:
+            if v != v_a and v != v_b:
+                return v
+        raise ValueError(f"Edge ({v_a}, {v_b}) not found in triangle {self.v_ref}")
+    def connectivity(self):
+        return sum(1 for link in self.adj_tri if link is not None)
+
+class Striper:
+    def __init__(self):
+        self.faces = None
+        self.adjacency_data = None
+        self.options = {}
+
+    def _build_adjacency(self):
+        adj_faces = [AdjTriangle(v0, v1, v2, i) for i, (v0, v1, v2) in enumerate(self.faces)]
+        edge_map = {}
+        for i, face_v in enumerate(self.faces):
+            v0, v1, v2 = face_v
+            edges = [(tuple(sorted((v0, v1))), 0), (tuple(sorted((v0, v2))), 1), (tuple(sorted((v1, v2))), 2)]
+            for edge_key, local_edge_index in edges:
+                if edge_key not in edge_map: edge_map[edge_key] = []
+                edge_map[edge_key].append((i, local_edge_index))
+
+        for edge_key, face_pairs in edge_map.items():
+            if len(face_pairs) == 2:
+                (f1_idx, e1_idx), (f2_idx, e2_idx) = face_pairs
+                adj_faces[f1_idx].adj_tri[e1_idx] = (f2_idx, e2_idx)
+                adj_faces[f2_idx].adj_tri[e2_idx] = (f1_idx, e1_idx)
+        self.adjacency_data = adj_faces
+
+    def _track_strip(self, start_face_index, v_oldest, v_middle, visited_faces):
+        strip_v, strip_f = [v_oldest, v_middle], []
+        curr_f_idx = start_face_index
+        while curr_f_idx is not None:
+            curr_f = self.adjacency_data[curr_f_idx]
+            v_newest = curr_f.opposite_vertex(v_oldest, v_middle)
+            strip_v.append(v_newest)
+            strip_f.append(curr_f_idx)
+            edge_idx = curr_f.find_edge_index(v_middle, v_newest)
+            link = curr_f.adj_tri[edge_idx]
+            v_oldest, v_middle = v_middle, v_newest
+            if link is None: break
+            next_f_idx, _ = link
+            if next_f_idx in visited_faces: break
+            curr_f_idx = next_f_idx
+        return strip_v, strip_f
+
+    def _compute_best_strip(self, start_face_index, visited_faces):
+        start_face = self.adjacency_data[start_face_index]
+        v0, v1, v2 = start_face.v_ref
+        start_edges = [(v0, v1), (v2, v0), (v1, v2)]
+        best_strip_v, best_strip_f = [], []
+
+        for v_start, v_end in start_edges:
+            local_visited = visited_faces.copy()
+            forward_v, forward_f = self._track_strip(start_face_index, v_start, v_end, local_visited)
+            for f_idx in forward_f: local_visited.add(f_idx)
+            forward_v.reverse()
+            forward_f.reverse()
+            v_new_start, v_new_end = forward_v[-2], forward_v[-1]
+            start_face_bw = self.adjacency_data[start_face_index]
+            entry_edge_idx = start_face_bw.find_edge_index(v_new_start, v_new_end)
+            link = start_face_bw.adj_tri[entry_edge_idx]
+            backward_v, backward_f = [], []
+            if link:
+                neighbor_f_idx, _ = link
+                if neighbor_f_idx not in local_visited:
+                    backward_v_full, backward_f = self._track_strip(neighbor_f_idx, v_new_start, v_new_end, local_visited)
+                    backward_v = backward_v_full[2:]
+            
+            combined_v = forward_v + backward_v
+            combined_f = forward_f + backward_f
+
+            if len(combined_v) > len(best_strip_v):
+                best_strip_v, best_strip_f = combined_v, combined_f
+        return best_strip_v, best_strip_f
+
+    def stripify(self, faces, sgi_algorithm=True, one_sided=False, connect_all_strips=False):
+        if not faces:
+            return []
+            
+        self.faces = faces
+        self.options = {
+            'SGIAlgorithm': sgi_algorithm,
+            'OneSided': one_sided,
+            'ConnectAllStrips': connect_all_strips
+        }
+        
+        self._build_adjacency()
+        
+
+        num_faces = len(self.faces)
+        insertion_order = list(range(num_faces))
+        
+        if self.options['SGIAlgorithm']:
+            insertion_order.sort(key=lambda i: self.adjacency_data[i].connectivity())
+
+        all_strips = []
+        visited_faces = set()
+        
+        for face_index in insertion_order:
+            if face_index not in visited_faces:
+                best_v, best_f = self._compute_best_strip(face_index, visited_faces)
+
+                for f_idx in best_f:
+                    visited_faces.add(f_idx)
+                
+                all_strips.append(best_v)
+
+        return all_strips
+
 
 def read_uint32_le(buf, off): 
     return struct.unpack_from("<I", buf, off)[0]
@@ -126,7 +253,6 @@ class ParsedFSKLData:
 
 def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
     def contains_images(folder_path: str) -> bool:
-        """Check if a folder contains image files"""
         if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
             return False
         
@@ -142,11 +268,9 @@ def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
             pass
         return False
     
-    # Get the directory containing the fmod file and the filename
     fmod_dir = os.path.dirname(fmod_path)
     fmod_filename = os.path.basename(fmod_path)
     
-    # Step 1: Extract first 3 characters of fmod filename and parse as number
     try:
         fmod_number = int(fmod_filename[:4])
     except (ValueError, IndexError):
@@ -155,13 +279,11 @@ def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
 
     print(f"fmod number {fmod_number}")
 
-    # Step 2: Look for folder with name starting with fmod_number + 2
     target_number = fmod_number + 2
-    target_prefix = f"{target_number:04d}"  # Pad to 3 digits with leading zeros
+    target_prefix = f"{target_number:04d}"  
     
     print(f"target_prefix {target_prefix}")
 
-    # Check directories in the same folder as the fmod file
     try:
         items = os.listdir(fmod_dir)
         for item in items:
@@ -172,18 +294,15 @@ def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
     except OSError:
         pass
     
-    # Step 3: If not found, check the containing folder name
     fmod_dir_name = os.path.basename(fmod_dir)
     try:
         containing_folder_number = int(fmod_dir_name[:4])
     except (ValueError, IndexError):
         return None
     
-    # Look for folder with name starting with containing_folder_number + 1
     target_number = containing_folder_number + 1
-    target_prefix = f"{target_number:04d}"  # Pad to 3 digits with leading zeros
+    target_prefix = f"{target_number:04d}"  
     
-    # Check directories in the parent folder
     parent_dir = os.path.dirname(fmod_dir)
     try:
         parent_items = os.listdir(parent_dir)
@@ -195,7 +314,6 @@ def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
     except OSError:
         pass
     
-    # Return None if no texture folder found
     return None
 
 def find_fskl_file(fmod_path: str) -> str:
@@ -407,6 +525,204 @@ def create_simple_strips(triangles: list[list[int]], material_indices: list[int]
         strip_material_indices.append(palette_idx)
     
     return strips, strip_material_indices
+
+def create_greedy_strips(triangles: list[list[int]], material_indices: list[int], material_list: list[int]) -> tuple[list[list[int]], list[int]]:
+    """
+    A simple but effective greedy algorithm for creating triangle strips.
+    """
+    final_strips: list[list[int]] = []
+    final_strip_materials: list[int] = []
+
+    # Map each triangle to its original index to track its material
+    tri_to_original_idx = {tuple(sorted(tri)): i for i, tri in enumerate(triangles)}
+
+    # Group triangles by their global material index
+    material_groups: dict[int, list[list[int]]] = {}
+    for i, tri in enumerate(triangles):
+        mat_idx = material_indices[i]
+        if mat_idx not in material_groups:
+            material_groups[mat_idx] = []
+        material_groups[mat_idx].append(tri)
+
+    # Process each material group independently
+    for mat_idx, tris in material_groups.items():
+        if not tris:
+            continue
+
+        # Find or add the material to the palette
+        if mat_idx not in material_list:
+            material_list.append(mat_idx)
+        palette_idx = material_list.index(mat_idx)
+
+        # Build adjacency map: edge -> list of triangles sharing that edge
+        adj: dict[tuple[int, int], list[int]] = {}
+        for i, tri in enumerate(tris):
+            for j in range(3):
+                v1, v2 = tri[j], tri[(j + 1) % 3]
+                edge = tuple(sorted((v1, v2)))
+                if edge not in adj:
+                    adj[edge] = []
+                adj[edge].append(i)
+        
+        used_tris = [False] * len(tris)
+        
+        for i in range(len(tris)):
+            if used_tris[i]:
+                continue
+
+            # Start a new strip
+            current_strip = list(tris[i])
+            used_tris[i] = True
+            
+            # Greedily extend the strip in one direction
+            while True:
+                last_v1, last_v2 = current_strip[-2], current_strip[-1]
+                edge = tuple(sorted((last_v1, last_v2)))
+                
+                next_tri_idx = -1
+                if edge in adj and len(adj[edge]) > 1:
+                    for tri_idx in adj[edge]:
+                        if not used_tris[tri_idx]:
+                            next_tri_idx = tri_idx
+                            break
+                
+                if next_tri_idx != -1:
+                    # Found an adjacent, unused triangle. Find the third vertex.
+                    next_tri = tris[next_tri_idx]
+                    third_v = -1
+                    for v in next_tri:
+                        if v != last_v1 and v != last_v2:
+                            third_v = v
+                            break
+                    
+                    current_strip.append(third_v)
+                    used_tris[next_tri_idx] = True
+                else:
+                    # Can't extend further
+                    break
+
+            final_strips.append(current_strip)
+            final_strip_materials.append(palette_idx)
+
+    return final_strips, final_strip_materials
+
+def create_fast_material_strips(triangles: list[list[int]], material_indices: list[int], material_list: list[int]) -> tuple[list[list[int]], list[int]]:
+    # Keep material grouping (format requirement)
+    material_groups: dict[int, list[tuple[int, list[int]]]] = {}
+    for i, tri in enumerate(triangles):
+        mat_idx = material_indices[i]
+        if mat_idx not in material_groups:
+            material_groups[mat_idx] = []
+        material_groups[mat_idx].append((i, tri))
+    
+    strips: list[list[int]] = []
+    strip_material_indices: list[int] = []
+    
+    # Process each material group with fast algorithm
+    for mat_idx, tri_list in material_groups.items():
+        # Fast O(n) adjacency building
+        edge_to_triangles = {}
+        triangles_in_group = [tri for _, tri in tri_list]
+        
+        for i, tri in enumerate(triangles_in_group):
+            for j in range(3):
+                edge = tuple(sorted([tri[j], tri[(j+1)%3]]))
+                if edge not in edge_to_triangles:
+                    edge_to_triangles[edge] = []
+                edge_to_triangles[edge].append(i)
+        
+        # Simple strip generation per material (gruco0002 style)
+        used = [False] * len(triangles_in_group)
+        
+        for start_idx in range(len(triangles_in_group)):
+            if used[start_idx]:
+                continue
+                
+            # Start new strip
+            strip = list(triangles_in_group[start_idx])
+            used[start_idx] = True
+            
+            # Extend strip as far as possible
+            while True:
+                last_edge = tuple(sorted([strip[-2], strip[-1]]))
+                next_tri_idx = None
+                
+                if last_edge in edge_to_triangles:
+                    for adj_idx in edge_to_triangles[last_edge]:
+                        if not used[adj_idx]:
+                            next_tri_idx = adj_idx
+                            break
+                
+                if next_tri_idx is None:
+                    break
+                    
+                # Add new vertex
+                next_tri = triangles_in_group[next_tri_idx]
+                new_vertex = next(v for v in next_tri if v not in last_edge)
+                strip.append(new_vertex)
+                used[next_tri_idx] = True
+            
+            strips.append(strip)
+            
+            # Map material index to palette
+            if mat_idx in material_list:
+                palette_idx = material_list.index(mat_idx)
+            else:
+                material_list.append(mat_idx)
+                palette_idx = len(material_list) - 1
+            strip_material_indices.append(palette_idx)
+    
+    return strips, strip_material_indices
+
+def create_sgi_strips(triangles: list[list[int]], material_indices: list[int], material_list: list[int]) -> tuple[list[list[int]], list[int]]:
+    """
+    Creates optimized triangle strips using the SGI algorithm, respecting material boundaries.
+    
+    Args:
+        triangles: List of all triangles in the mesh.
+        material_indices: List of material indices per triangle.
+        material_list: The material palette to be populated or referenced.
+        
+    Returns:
+        tuple: (list_of_strips, list_of_strip_material_indices)
+    """
+    final_strips = []
+    final_strip_materials = []
+
+    # Group triangles by their material index
+    material_groups = {}
+    for i, tri in enumerate(triangles):
+        mat_idx = material_indices[i]
+        if mat_idx not in material_groups:
+            material_groups[mat_idx] = []
+        material_groups[mat_idx].append(tri)
+
+    # Process each material group independently
+    for mat_idx, tris_for_material in material_groups.items():
+        if not tris_for_material:
+            continue
+
+        # Find the index of this material in the final palette
+        if mat_idx not in material_list:
+            material_list.append(mat_idx)
+        palette_idx = material_list.index(mat_idx)
+
+        # Use the Striper on this group of triangles
+        striper = Striper()
+        # NOTE: one_sided=True is recommended for correctness. connect_all_strips=False
+        # is used because we want separate strips per material.
+        material_strips = striper.stripify(
+            faces=tris_for_material, 
+            sgi_algorithm=True, 
+            one_sided=True, 
+            connect_all_strips=False
+        )
+
+        # Add the generated strips and their material index to the final lists
+        final_strips.extend(material_strips)
+        final_strip_materials.extend([palette_idx] * len(material_strips))
+
+    return final_strips, final_strip_materials
 
 def parent_mesh_to_armature(mesh_obj, armature_obj):
     """Parent a mesh object to an armature object and add an armature modifier."""
@@ -1350,7 +1666,7 @@ def material_data_from_materials(material: bpy.types.Material, texture_names: li
 
     return parsed_material_data
 
-def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str]) -> ParsedMeshData:
+def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str], include_bone_list: bool = True) -> ParsedMeshData:
     mesh_data = ParsedMeshData()
 
     temp_mesh = mesh.data.copy()
@@ -1416,12 +1732,13 @@ def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str]) -> Pars
         else:
             face_materials.append(0)
 
-    material_list = list(set(face_materials))
+    print(f"Materials = {temp_mesh.materials}")
+    material_list = list(range(len(temp_mesh.materials)))
 
     strips = []
     strip_material_indices = []
 
-    strips, strip_material_indices = create_simple_strips(triangles, face_materials, material_list)
+    strips, strip_material_indices = create_sgi_strips(triangles, face_materials, material_list)
 
     mesh_data.faces = strips
     mesh_data.material_list = material_list
@@ -1441,53 +1758,104 @@ def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str]) -> Pars
         if armature:
             print(f"Found armature '{armature.name}' for mesh '{mesh.name}'")
             
-            # Map vertex groups to bone indices
-            bone_ids = []  # Final list of bone IDs
-            vgroup_to_bone_idx = {}  # Maps vertex group index to bone index in bone_ids list
-            
-            for vg in mesh.vertex_groups:
-                # Look for vertex groups that follow the "Bone_X" pattern
-                if vg.name.startswith("Bone_"):
-                    try:
-                        bone_id = int(vg.name[5:])  # Extract number from "Bone_X"
-                        bone_idx = len(bone_ids)
-                        bone_ids.append(bone_id)
-                        vgroup_to_bone_idx[vg.index] = bone_idx
-                    except ValueError:
-                        # Not a bone vertex group or invalid format
-                        pass
-            
-            if bone_ids:
-                print(f"Found {len(bone_ids)} bones referenced in vertex groups")
+            if include_bone_list:
+                # Map vertex groups to bone indices
+                bone_ids = []  # Final list of bone IDs
+                vgroup_to_bone_idx = {}  # Maps vertex group index to bone index in bone_ids list
                 
-                # Extract weights for each vertex
-                weights = []
-                for vert in temp_mesh.vertices:
-                    vert_weights = []
-                    
-                    for vg in vert.groups:
-                        if vg.group in vgroup_to_bone_idx and vg.weight > 0:
-                            bone_idx = vgroup_to_bone_idx[vg.group]
-                            # Convert weight from 0-1 to 0-100 scale as expected by FMOD
-                            weight_value = vg.weight * 100.0
-                            vert_weights.append((bone_idx, weight_value))
-                    
-                    # Sort by weight (highest first) and limit to 4 weights if needed
-                    vert_weights.sort(key=lambda x: x[1], reverse=True)
-                    if len(vert_weights) > 4:
-                        vert_weights = vert_weights[:4]
-                    
-                    # Normalize weights to sum to 100 if we have weights
-                    if vert_weights:
-                        total_weight = sum(w for _, w in vert_weights)
-                        if total_weight > 0:
-                            vert_weights = [(idx, (w / total_weight) * 100.0) for idx, w in vert_weights]
-                    
-                    weights.append(vert_weights)
+                for vg in mesh.vertex_groups:
+                    # Look for vertex groups that follow the "Bone_X" pattern
+                    if vg.name.startswith("Bone_"):
+                        try:
+                            bone_id = int(vg.name[5:])  # Extract number from "Bone_X"
+                            bone_idx = len(bone_ids)
+                            bone_ids.append(bone_id)
+                            vgroup_to_bone_idx[vg.index] = bone_idx
+                        except ValueError:
+                            # Not a bone vertex group or invalid format
+                            pass
                 
-                mesh_data.weights = weights
-                mesh_data.bones_list = bone_ids
-                print(f"Extracted weights for {len(weights)} vertices referencing {len(bone_ids)} bones")
+                if bone_ids:
+                    print(f"Found {len(bone_ids)} bones referenced in vertex groups")
+                    
+                    # Extract weights for each vertex
+                    weights = []
+                    for vert in mesh.data.vertices:
+                        vert_weights = []
+                        
+                        for vg in vert.groups:
+                            if vg.group in vgroup_to_bone_idx and vg.weight > 0:
+                                bone_idx = vgroup_to_bone_idx[vg.group]
+                                # Convert weight from 0-1 to 0-100 scale as expected by FMOD
+                                weight_value = vg.weight * 100.0
+                                vert_weights.append((bone_idx, weight_value))
+                        
+                        # Sort by weight (highest first) and limit to 4 weights if needed
+                        vert_weights.sort(key=lambda x: x[1], reverse=True)
+                        if len(vert_weights) > 4:
+                            vert_weights = vert_weights[:4]
+                        
+                        # Normalize weights to sum to 100 if we have weights
+                        if vert_weights:
+                            total_weight = sum(w for _, w in vert_weights)
+                            if total_weight > 0:
+                                vert_weights = [(idx, (w / total_weight) * 100.0) for idx, w in vert_weights]
+                        
+                        weights.append(vert_weights)
+                    
+                    mesh_data.weights = weights
+                    mesh_data.bones_list = bone_ids
+                    print(f"Extracted weights for {len(weights)} vertices referencing {len(bone_ids)} bones")
+            else :
+                # Case 2: Direct bone ID references (no bone list)
+                print("Using direct bone ID approach - weights reference global bone IDs")
+                
+                # Map vertex groups directly to bone IDs
+                vgroup_to_bone_id = {}  # Maps vertex group index directly to global bone ID
+                
+                for vg in mesh.vertex_groups:
+                    # Look for vertex groups that follow the "Bone_X" pattern
+                    if vg.name.startswith("Bone_"):
+                        try:
+                            bone_id = int(vg.name[5:])  # Extract number from "Bone_X"
+                            vgroup_to_bone_id[vg.index] = bone_id
+                        except ValueError:
+                            # Not a bone vertex group or invalid format
+                            pass
+                
+                if vgroup_to_bone_id:
+                    print(f"Found {len(vgroup_to_bone_id)} bone vertex groups")
+                    
+                    # Extract weights for each vertex
+                    weights = []
+                    for vert in mesh.data.vertices:
+                        vert_weights = []
+                        
+                        for vg in vert.groups:
+                            if vg.group in vgroup_to_bone_id and vg.weight > 0:
+                                bone_id = vgroup_to_bone_id[vg.group]  # Global bone ID
+                                # Convert weight from 0-1 to 0-100 scale as expected by FMOD
+                                weight_value = vg.weight * 100.0
+                                print(f"bone_id: {bone_id}, weight_value: {weight_value}")
+                                vert_weights.append((bone_id, weight_value))
+                        
+                        # Sort by weight (highest first) and limit to 4 weights if needed
+                        vert_weights.sort(key=lambda x: x[1], reverse=True)
+                        if len(vert_weights) > 4:
+                            vert_weights = vert_weights[:4]
+                        
+                        # Normalize weights to sum to 100 if we have weights
+                        if vert_weights:
+                            total_weight = sum(w for _, w in vert_weights)
+                            if total_weight > 0:
+                                vert_weights = [(idx, (w / total_weight) * 100.0) for idx, w in vert_weights]
+                        
+                        weights.append(vert_weights)
+                    
+                    mesh_data.weights = weights
+                    mesh_data.bones_list = None  # No bone list when using direct references
+                    print(f"Extracted weights for {len(weights)} vertices using direct bone IDs")
+
 
     bpy.data.meshes.remove(temp_mesh)
     return mesh_data
@@ -1852,6 +2220,114 @@ def write_fmod(parsed_data: ParsedFMODData) -> None:
     main_file_data = bytearray(main_file_header) + main_file_data
     return main_file_data
 
+def collect_unique_images(context):
+    """Collect all unique images used in materials across the scene"""
+    unique_images = {}
+    image_idx = 0
+
+    for obj in context.scene.objects:
+        if not hasattr(obj.data, "materials") or not obj.data.materials:
+            continue
+
+        for mat_slots in obj.material_slots:
+            if not mat_slots.material or not mat_slots.material.use_nodes:
+                continue
+
+            for node in mat_slots.material.node_tree.nodes:
+                if node.type == 'TEX_IMAGE' and node.image:
+                    if node.image not in unique_images:
+                        unique_images[node.image] = image_idx
+                        image_idx += 1
+    
+    return unique_images
+
+def material_and_texture_data_from_material(material: bpy.types.Material, image_dict: dict[bpy.types.Image, int], global_texture_count: int, resize_option: str) -> tuple[ParsedMaterialData, list[ParsedTextureData]]:
+    """Create material data and associated texture data blocks for a single material"""
+    
+    # Maps texture type to image
+    material_images = {
+        'diffuse': None,
+        'normal': None, 
+        'specular': None
+    }
+
+    principled_node = None
+    for node in material.node_tree.nodes:
+        if node.type == 'BSDF_PRINCIPLED':
+            principled_node = node
+            break
+
+    if principled_node:
+        for link in material.node_tree.links:
+            if link.to_node == principled_node:
+                input_name = link.to_socket.name
+                from_node = link.from_node
+
+                if from_node.type == 'TEX_IMAGE' and from_node.image:
+                    if input_name == 'Base Color':
+                        material_images['diffuse'] = from_node.image
+                    elif input_name in ['Specular', 'Specular Tint', 'Specular IOR Level', 'Roughness']:
+                        material_images['specular'] = from_node.image
+                
+                # Handle normal maps (may be connected through a Normal Map node)
+                elif from_node.type == 'NORMAL_MAP':
+                    for normal_link in material.node_tree.links:
+                        if (normal_link.to_node == from_node and 
+                            normal_link.from_node.type == 'TEX_IMAGE' and 
+                            normal_link.from_node.image):
+                            material_images['normal'] = normal_link.from_node.image
+
+    # Create texture data blocks for textures used by this material
+    texture_blocks = []
+    global_texture_indices = {}
+    
+    current_global_idx = global_texture_count
+    
+    for tex_type, image in material_images.items():
+        if image and image in image_dict:
+            image_idx = image_dict[image]
+
+            # Determine the correct dimensions based on the resize option
+            width, height = image.size[0], image.size[1]
+            if resize_option != 'NONE':
+                size = int(resize_option)
+                width, height = size, size
+            
+            # Create a texture data block for this material's use of the image
+            texture_data = ParsedTextureData(
+                image_idx=image_idx,
+                width=width,
+                height=height,
+                data=bytes([0] * 244)  # Standard 244 bytes of zeros
+            )
+            
+            texture_blocks.append(texture_data)
+            # Store the GLOBAL texture block index for this texture type
+            global_texture_indices[tex_type] = current_global_idx
+            current_global_idx += 1
+
+    # Create material data with references to GLOBAL texture block indices
+    diffuse_rgba = (1.0, 1.0, 1.0, 1.0)
+    specular_rgba = (1.0, 1.0, 1.0, 0.0)
+    ambient_rgba = (0.3, 0.3, 0.3, 0.0)
+    specular_str = 50.0
+
+    texture_count = len(texture_blocks)
+
+    parsed_material_data = ParsedMaterialData(
+        ambient_rgba=ambient_rgba,
+        diffuse_rgba=diffuse_rgba,
+        specular_rgba=specular_rgba,
+        specular_str=specular_str,
+        texture_count=texture_count,
+        unknown_data=bytes([0] * 200),
+        texture_diffuse=global_texture_indices.get('diffuse'),
+        texture_normal=global_texture_indices.get('normal'),
+        texture_specular=global_texture_indices.get('specular')
+    )
+
+    return parsed_material_data, texture_blocks
+
 class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
     """Export model, textures, materials and skeleton to FMOD"""
     bl_idname = "export_scene.fmod"
@@ -1872,25 +2348,54 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         default=False,
     )
 
+    include_bone_list: bpy.props.BoolProperty(
+        name="Include Bone List",
+        description="Include bone list block in mesh (weights reference local indices). If disabled, weights reference global bone IDs directly",
+        default=True,
+    )
+
+    force_resize_items = [
+        ('NONE', "None", "Do not resize textures"),
+        ('128', "128x128", "Resize textures to 128x128"),
+        ('256', "256x256", "Resize textures to 256x256"),
+        ('512', "512x512", "Resize textures to 512x512"),
+    ]
+    force_texture_resize: bpy.props.EnumProperty(
+        name="Force Texture Resize",
+        description="Force resize all exported textures to a specific dimension",
+        items=force_resize_items,
+        default='NONE',
+    )
+
     def execute(self, context):
-        
-        textures = collect_scene_texture(context)
-        print(f"Collected {len(textures)} textures from the scene")
-        texture_names = [image.name for image, _ in sorted(textures.items(), key=lambda item: item[1])]
-        print(f"Texture names: {texture_names}")
-        texture_data = []
-        for image, idx in textures.items():
-            texture_data.append(texture_data_from_image(image, idx))
-        print(f"Generated texture data for {len(texture_data)} textures")
+
+        image_dict = collect_unique_images(context)
+        print(f"Collected {len(image_dict)} unique images from the scene")
 
         materials = collect_scene_materials(context)
         print(f"Collected {len(materials)} materials from the scene")
-        material_names = [material.name for material, _ in sorted(materials.items(), key=lambda item: item[1])]
-        print(f"Material names: {material_names}")
+
         materials_data = []
-        for material, idx in materials.items():
-            materials_data.append(material_data_from_materials(material, texture_names))
+        all_texture_data = []
+        material_names = []
+        global_texture_count = 0
+
+        for material, idx in sorted(materials.items(), key=lambda item: item[1]):
+            material_names.append(material.name)
+            
+            # Create material data and its associated texture blocks
+            material_data, texture_blocks = material_and_texture_data_from_material(material, image_dict, global_texture_count, self.force_texture_resize)
+            materials_data.append(material_data)
+            
+            # Add texture blocks to global texture list
+            all_texture_data.extend(texture_blocks)
+
+            global_texture_count += len(texture_blocks)
+            
+            print(f"Material '{material.name}': created {len(texture_blocks)} texture blocks")
+    
         print(f"Generated material data for {len(materials_data)} materials")
+        print(f"Generated texture data for {len(all_texture_data)} texture blocks")
 
         meshes = collect_scene_meshes(context)
         print(f"Collected {len(meshes)} meshes from the scene")
@@ -1898,11 +2403,11 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         print(f"Mesh names: {mesh_names}")
         meshes_data = []
         for mesh, idx in meshes.items():
-            meshes_data.append(mesh_data_from_mesh(mesh, material_names))
+            meshes_data.append(mesh_data_from_mesh(mesh, material_names, self.include_bone_list))
         print(f"Generated mesh data for {len(meshes_data)} meshes")
 
         # Create the FMOD data structure
-        parsed_fmod_data = ParsedFMODData(meshes=meshes_data, textures=texture_data, materials=materials_data)
+        parsed_fmod_data = ParsedFMODData(meshes=meshes_data, textures=all_texture_data, materials=materials_data)
         print("Parsed FMOD data successfully")
 
         # Check if an armature is present in the scene
@@ -1957,28 +2462,49 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
 
         # Save the textures to the directory
         texture_file_names = []
-        for texture, index in textures.items():
+        for texture, index in image_dict.items():
             padded_index = str(index+1).zfill(4)
             random_hex = hex(random.randint(0x00000000, 0xFFFFFFFF))[2:].upper()
             padded_hex = random_hex.zfill(8)
             texture_name = f"{padded_index}_{padded_hex}.png"
             texture_path = os.path.join(texture_directory_path, texture_name)
+            
+            image_to_save = texture
+            is_copy = False
+            
             try:
+                # Check if resizing is requested
+                if self.force_texture_resize != 'NONE':
+                    size = int(self.force_texture_resize)
+                    # Resize only if the image is not already the target size
+                    if texture.size[0] != size or texture.size[1] != size:
+                        print(f"Resizing texture '{texture.name}' to {size}x{size}...")
+                        image_to_save = texture.copy()
+                        image_to_save.scale(size, size)
+                        is_copy = True
+
+                # Set up scene for saving
                 temp_scene = bpy.data.scenes.new("RGB_Export")
-                
                 temp_scene.render.image_settings.file_format = 'PNG'
-                temp_scene.render.image_settings.color_mode = 'RGB'  
+                temp_scene.render.image_settings.color_mode = 'RGB'
                 temp_scene.render.image_settings.color_depth = '8'
                 temp_scene.render.image_settings.compression = 15
                 
-                texture.save_render(filepath=texture_path, scene=temp_scene)
+                # Save the determined image (original or resized copy)
+                image_to_save.save_render(filepath=texture_path, scene=temp_scene)
                 
+                # Clean up the temporary scene and the copied image if one was made
                 bpy.data.scenes.remove(temp_scene)
+                if is_copy:
+                    bpy.data.images.remove(image_to_save)
         
                 texture_file_names.append(texture_name)
                 print(f"Exported texture {texture.name} to {texture_path}")
             except Exception as e:
                 print(f"Failed to export texture {texture.name}: {e}")
+                # Ensure the copy is removed even if saving fails
+                if is_copy:
+                    bpy.data.images.remove(image_to_save, do_unlink=True)
 
         # Handling the skeleton file
         fskl_name = None
