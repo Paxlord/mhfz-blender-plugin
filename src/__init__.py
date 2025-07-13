@@ -12,10 +12,15 @@ import bpy #type: ignore
 
 from .import_operators import *
 from .export_operators import *
+from . import ui_panels
 
 classes = (
     ImportFMOD,
     ExportFMOD,
+    ui_panels.FMOD_SetupProperties,
+    ui_panels.FMOD_OT_SetupMesh, 
+    ui_panels.FMOD_PT_SetupPanel,
+
 )
 
 def menu_func_import(self, context):
@@ -31,11 +36,15 @@ def register():
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
+    bpy.types.Scene.fmod_setup_props = bpy.props.PointerProperty(type=ui_panels.FMOD_SetupProperties)
+
 def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
+
+    del bpy.types.Scene.fmod_setup_props
 
 if __name__ == "__main__":
     register()
