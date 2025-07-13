@@ -1,6 +1,6 @@
-import bpy
-from bpy.props import EnumProperty, StringProperty
-from bpy.types import Panel, PropertyGroup
+import bpy # type: ignore
+from bpy.props import EnumProperty, StringProperty # type: ignore
+from bpy.types import Panel, PropertyGroup # type: ignore
 from .setup_tools import *
 
 def get_mesh_items(self, context):
@@ -30,21 +30,21 @@ class FMOD_SetupProperties(PropertyGroup):
         description="Select the mesh to setup for FMOD export",
         items=get_mesh_items,
         default=0
-    )
+    ) # type: ignore
 
     target_sub_mesh: EnumProperty(
         name="Target Sub Mesh",
         description="Select the sub mesh (shield) for SNS setup",
         items=get_mesh_items,
         default=0
-    )
+    ) # type: ignore
     
     target_armature: EnumProperty(
         name="Target Armature", 
         description="Select the armature to parent the mesh to",
         items=get_armature_items,
         default=0
-    )
+    ) # type: ignore
     
     item_type: EnumProperty(
         name="Item Type",
@@ -57,14 +57,14 @@ class FMOD_SetupProperties(PropertyGroup):
         ],
         default='NONE',
         update=update_item_type
-    )
+    ) # type: ignore
     
     item_subtype: EnumProperty(
         name="Item Subtype",
         description="Select the specific subtype",
         items=lambda self, context: get_subtype_items(self, context),
         default=0
-    )
+    ) # type: ignore
 
 def get_subtype_items(self, context):
     setup_props = context.scene.fmod_setup_props
