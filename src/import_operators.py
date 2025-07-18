@@ -8,7 +8,6 @@ from .model_utils import *
 
 def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
     def contains_images(folder_path: str) -> bool:
-        """Check if a folder contains image files"""
         if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
             return False
         
@@ -26,6 +25,10 @@ def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
     
     
     fmod_dir = os.path.dirname(fmod_path)
+
+    if contains_images(fmod_dir):
+        return fmod_dir
+
     fmod_filename = os.path.basename(fmod_path)
     
     
@@ -43,7 +46,6 @@ def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
     
     print(f"target_prefix {target_prefix}")
 
-    
     try:
         items = os.listdir(fmod_dir)
         for item in items:

@@ -394,12 +394,19 @@ def parse_directory(buf, off, fmod_data: ParsedFMODData):
         fmod_data.textures.extend(texture_data)
 
 def load_texture_no_dupes(parsed_fmod_data, texture_folder):
-    files = sorted([f for f in os.listdir(texture_folder) if os.path.isfile(os.path.join(texture_folder, f))])
+    image_extensions = {'.png', '.jpg', '.jpeg', '.tga', '.dds', '.bmp', '.tiff'}
+    files = sorted([f for f in os.listdir(texture_folder) 
+                   if os.path.isfile(os.path.join(texture_folder, f)) 
+                   and os.path.splitext(f.lower())[1] in image_extensions])
     
     file_to_image = {}
     texture_dic = {}
     
     for i, texture in enumerate(parsed_fmod_data.textures):
+        if texture.image_idx >= len(files):
+            print(f"Warning: texture.image_idx {texture.image_idx} is out of range for {len(files)} image files")
+            continue
+            
         file_path = os.path.join(texture_folder, files[texture.image_idx])
         
         try:
@@ -421,5 +428,6 @@ def load_texture_no_dupes(parsed_fmod_data, texture_folder):
     print(f"  - {len(texture_dic)} texture slots")
     print(f"  - {len(file_to_image)} unique texture files")
     print(f"  - {len(set(texture_dic.values()))} unique image objects")
+    print(f"  - Found {len(files)} image files in folder")
     
     return texture_dic
