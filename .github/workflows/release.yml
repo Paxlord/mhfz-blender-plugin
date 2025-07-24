@@ -22,33 +22,33 @@ jobs:
 
       - name: Update version in bl_info (optional)
         run: |
-          # CORRECTED: Use replace(string, find, replace_with) syntax
-          sed -i 's/"version": (.*),/"version": (${{ replace(steps.get_version.outputs.VERSION_NUMBER, '.', ', ') }}),/' src/__init__.py
+          # Get the version number (e.g., "1.2.3") from the previous step's output
+          VERSION_NUM="${{ steps.get_version.outputs.VERSION_NUMBER }}"
+
+          # Use bash's built-in string replacement to turn "1.2.3" into "1, 2, 3"
+          BLENDER_VERSION_TUPLE="${VERSION_NUM//./, }"
+
+          # Use the new shell variable in the sed command.
+          # Note the use of double quotes to allow shell variable expansion.
+          sed -i "s/\"version\": (.*),/\"version\": ($BLENDER_VERSION_TUPLE),/" src/__init__.py
 
       - name: Create release archive and get info
         id: archive
         run: |
-          # Create a properly named zip file
           zip -r fmod_importer_${{ steps.get_version.outputs.VERSION }}.zip ./src -q
-
-          # Also create a generic name for consistency
           cp fmod_importer_${{ steps.get_version.outputs.VERSION }}.zip fmod_importer.zip
-
-          # Show what we've created
           ls -la *.zip
 
-          # NEW: Calculate file size and save it to an output
+          # Calculate file size and save it to a step output
           FILE_SIZE=$(stat -c%s fmod_importer.zip | numfmt --to=iec-i)
           echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_OUTPUT
 
       - name: Generate changelog
         id: changelog
         run: |
-          # Use a default value if the file doesn't exist to simplify the logic
           CHANGELOG_BODY="No changelog available for this release."
           if [ -f CHANGELOG.md ]; then
-            # Using a more robust awk command to grab the correct section
-            # and stop at the next version, and also handling file not found.
+            # Extract changelog for this version
             CHANGELOG_BODY=$(awk '/^## \[${{ steps.get_version.outputs.VERSION }}\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md)
           fi
           # Use a multiline string delimiter for cleaner output
@@ -74,12 +74,6 @@ jobs:
             2. In Blender, go to Edit > Preferences > Add-ons
             3. Click "Install..." and select the downloaded zip file
             4. Enable the "FMOD Importer" addon
-
-            ### Features
-            - Import FMOD (.fmod) model files
-            - Export FMOD files from Blender
-            - Support for textures, materials, and skeletal data
-            - Weapon setup tools for various Monster Hunter weapon types
 
             ### Changes in this version
             ${{ steps.changelog.outputs.BODY }}
