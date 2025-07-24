@@ -90,13 +90,3 @@ jobs:
           asset_path: ./fmod_importer_${{ steps.get_version.outputs.VERSION }}.zip
           asset_name: fmod_importer_${{ steps.get_version.outputs.VERSION }}.zip
           asset_content_type: application/zip
-
-      - name: Upload Release Asset (generic name)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./fmod_importer.zip
-          asset_name: fmod_importer.zip
-          asset_content_type: application/zip
