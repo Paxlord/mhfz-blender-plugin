@@ -9,6 +9,12 @@ jobs:
   release:
     runs-on: ubuntu-latest
 
+    # === SOLUTION ===
+    # Grant the job permission to write to the repository's contents,
+    # which is required for creating releases and uploading assets.
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,14 +28,8 @@ jobs:
 
       - name: Update version in bl_info (optional)
         run: |
-          # Get the version number (e.g., "1.2.3") from the previous step's output
           VERSION_NUM="${{ steps.get_version.outputs.VERSION_NUMBER }}"
-
-          # Use bash's built-in string replacement to turn "1.2.3" into "1, 2, 3"
           BLENDER_VERSION_TUPLE="${VERSION_NUM//./, }"
-
-          # Use the new shell variable in the sed command.
-          # Note the use of double quotes to allow shell variable expansion.
           sed -i "s/\"version\": (.*),/\"version\": ($BLENDER_VERSION_TUPLE),/" src/__init__.py
 
       - name: Create release archive and get info
@@ -38,8 +38,6 @@ jobs:
           zip -r fmod_importer_${{ steps.get_version.outputs.VERSION }}.zip ./src -q
           cp fmod_importer_${{ steps.get_version.outputs.VERSION }}.zip fmod_importer.zip
           ls -la *.zip
-
-          # Calculate file size and save it to a step output
           FILE_SIZE=$(stat -c%s fmod_importer.zip | numfmt --to=iec-i)
           echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_OUTPUT
 
@@ -48,10 +46,8 @@ jobs:
         run: |
           CHANGELOG_BODY="No changelog available for this release."
           if [ -f CHANGELOG.md ]; then
-            # Extract changelog for this version
             CHANGELOG_BODY=$(awk '/^## \[${{ steps.get_version.outputs.VERSION }}\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md)
           fi
-          # Use a multiline string delimiter for cleaner output
           echo "BODY<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG_BODY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
