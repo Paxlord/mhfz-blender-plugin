@@ -2,7 +2,7 @@
 
 A Blender addon for importing and exporting FMOD model files (.fmod) from **Monster Hunter Frontier Z**.
 
-![Blender Version](https://img.shields.io/badge/Blender-3.4+-orange)
+![Blender Version](https://img.shields.io/badge/Blender-4.4+-orange)
 ![Python Version](https://img.shields.io/badge/Python-3.7+-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen)
