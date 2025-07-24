@@ -44,6 +44,17 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         default='NONE',
     ) # type: ignore
 
+    export_type_items = [
+        ('WEAPON', "Weapon", "Exports with a weapon folder structure"),
+        ('ARMOR', "Armor", "Exports with an armor folder structure")
+    ]
+    export_type: bpy.props.EnumProperty(
+        name="Export Type",
+        description="Specify the type of folder structure for the exported model",
+        items=export_type_items,
+        default="WEAPON",
+    ) #type: ignore
+
     def execute(self, context):
 
         image_dict = collect_unique_images(context)
@@ -133,14 +144,20 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         texture_directory_name = f"0003_{texture_unique_id}"
         
         texture_directory_path = os.path.join(export_directory, texture_directory_name)
+        if self.export_type == "ARMOR":
+            texture_directory_path = export_directory
+
         if not os.path.exists(texture_directory_path):
             os.makedirs(texture_directory_path)
             print(f"Created directory: {texture_directory_path}")
 
         
         texture_file_names = []
+        index_off = 1
+        if self.export_type == "ARMOR":
+            index_off = 3
         for texture, index in image_dict.items():
-            padded_index = str(index+1).zfill(4)
+            padded_index = str(index+index_off).zfill(4)
             random_hex = hex(random.randint(0x00000000, 0xFFFFFFFF))[2:].upper()
             padded_hex = random_hex.zfill(8)
             texture_name = f"{padded_index}_{padded_hex}.png"
