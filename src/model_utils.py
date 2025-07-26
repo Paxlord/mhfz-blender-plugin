@@ -162,6 +162,44 @@ def create_blender_mesh(obj_name: str, mesh_name: str, parsed_data: ParsedMeshDa
                 if vertex_index < len(uvs):
                     uv_layer.data[loop_index].uv = uvs[vertex_index]
 
+    if parsed_data.tpn_vec:
+        print(f"Applying custom tangents to mesh '{mesh_name}'")
+        
+        if not mesh_data.uv_layers:
+            print(f"Mesh '{mesh_name}' has TPN data but no UVs. Tangents cannot be set.")
+        else:
+            try:
+                mesh_data.calc_tangents(uvmap=mesh_data.uv_layers.active.name)
+                
+                tangent_attr = mesh_data.attributes.get('tangent')
+                bitangent_sign_attr = mesh_data.attributes.get('bitangent_sign')
+
+                vertex_to_tpn = {i: data for i, data in enumerate(parsed_data.tpn_vec)}
+
+                num_loops = len(mesh_data.loops)
+                new_tangents = [0.0] * (num_loops * 3)
+                new_signs = [0.0] * num_loops
+
+                for i, loop in enumerate(mesh_data.loops):
+                    vert_idx = loop.vertex_index
+                    if vert_idx in vertex_to_tpn:
+                        tpn_data = vertex_to_tpn[vert_idx]
+                        
+                        tangent = (tpn_data[0], tpn_data[1], tpn_data[2])
+                        sign = tpn_data[3]
+                        
+                        new_tangents[i*3 : i*3 + 3] = tangent
+                        new_signs[i] = sign
+                
+                tangent_attr.data.foreach_set('vector', new_tangents)
+                bitangent_sign_attr.data.foreach_set('value', new_signs)
+
+                print(f"Successfully applied {len(parsed_data.tpn_vec)} custom tangents.")
+                
+            except Exception as e:
+                print(f"Error applying custom tangents: {e}")
+
+
     if colors and len(colors) == len(vertices):
         color_layer = mesh_data.vertex_colors.new(name="VertexColor")
         for poly in mesh_data.polygons:
@@ -474,3 +512,53 @@ def collect_unique_images(context):
                         image_idx += 1
     
     return unique_images
+
+def extract_tpn_for_export(mesh_obj: bpy.types.Object) -> list[tuple[float, float, float, float]]:
+    mesh_data = mesh_obj.data
+    
+    if not mesh_data.uv_layers:
+        print(f"Warning: No UV layers on {mesh_obj.name}, cannot generate tangents")
+        return []
+    
+    mesh_data.calc_tangents(uvmap=mesh_data.uv_layers.active.name)
+    
+    vertex_tangents = {}
+    vertex_signs = {}
+    vertex_counts = {}
+    
+    for poly in mesh_data.polygons:
+        for loop_index in poly.loop_indices:
+            loop = mesh_data.loops[loop_index]
+            vert_idx = loop.vertex_index
+            
+            if vert_idx not in vertex_tangents:
+                vertex_tangents[vert_idx] = [0.0, 0.0, 0.0]
+                vertex_signs[vert_idx] = 0.0
+                vertex_counts[vert_idx] = 0
+            
+            vertex_tangents[vert_idx][0] += loop.tangent[0]
+            vertex_tangents[vert_idx][1] += loop.tangent[1] 
+            vertex_tangents[vert_idx][2] += loop.tangent[2]
+            vertex_signs[vert_idx] += loop.bitangent_sign
+            vertex_counts[vert_idx] += 1
+    
+    tpn_data = []
+    for i in range(len(mesh_data.vertices)):
+        if i in vertex_tangents and vertex_counts[i] > 0:
+            count = vertex_counts[i]
+            avg_tangent = [
+                vertex_tangents[i][0] / count,
+                vertex_tangents[i][1] / count, 
+                vertex_tangents[i][2] / count
+            ]
+            avg_sign = vertex_signs[i] / count
+            
+            length = (avg_tangent[0]**2 + avg_tangent[1]**2 + avg_tangent[2]**2)**0.5
+            if length > 0:
+                avg_tangent = [avg_tangent[0]/length, avg_tangent[1]/length, avg_tangent[2]/length]
+            
+            tpn_data.append((avg_tangent[0], avg_tangent[1], avg_tangent[2], avg_sign))
+        else:
+            tpn_data.append((1.0, 0.0, 0.0, 1.0))
+    
+    return tpn_data

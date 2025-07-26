@@ -33,6 +33,7 @@ class ParsedMeshData:
     weights: list[list[tuple[int, int]]] | None = None
     bones_list: list[int] | None = None
     tpn_vec: list[tuple[float, float, float, float]] | None = None
+    attributes: list[int] | None = None
 
 @dataclass
 class ParsedTextureData:

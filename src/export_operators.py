@@ -28,8 +28,20 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
     include_bone_list: bpy.props.BoolProperty(
         name="Include Bone List",
         description="Include bone list block in mesh (weights reference local indices). If disabled, weights reference global bone IDs directly",
-        default=True,
+        default=False,
     ) # type: ignore
+
+    include_tangents: bpy.props.BoolProperty(
+        name="Include Tangents (TPN)",
+        description="Include TPN tangent block (for monster models)",
+        default=False,
+    ) # type: ignore
+
+    include_attribute_array: bpy.props.BoolProperty(
+        name="Include Attrib array",
+        description="Include attrib array block",
+        default=False,
+    ) #type: ignore
 
     force_resize_items = [
         ('NONE', "None", "Do not resize textures"),
@@ -91,7 +103,7 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         print(f"Mesh names: {mesh_names}")
         meshes_data = []
         for mesh, idx in meshes.items():
-            meshes_data.append(mesh_data_from_mesh(mesh, material_names, self.include_bone_list))
+            meshes_data.append(mesh_data_from_mesh(mesh, material_names, self.include_bone_list, self.include_attribute_array, self.include_tangents))
         print(f"Generated mesh data for {len(meshes_data)} meshes")
 
         

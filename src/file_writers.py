@@ -82,8 +82,12 @@ def material_data_from_materials(material: bpy.types.Material, texture_names: li
 
     return parsed_material_data
 
-def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str], include_bone_list: bool = True) -> ParsedMeshData:
+def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str], include_bone_list: bool = True,force_empty_attributes: bool = False, include_tangeants: bool = False) -> ParsedMeshData:
     mesh_data = ParsedMeshData()
+
+    if force_empty_attributes:
+        empty_block = [65536] + [0] * 17
+        mesh_data.attributes = empty_block
 
     temp_mesh = mesh.data.copy()
     temp_mesh.transform(Matrix.Identity(4))
@@ -134,6 +138,16 @@ def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str], include
     else:
         mesh_data.colors = [(1.0, 1.0, 1.0, 1.0) for _ in range(len(temp_mesh.vertices))]
     print(f"Mesh colors: {len(mesh_data.colors)}")
+
+    if temp_mesh.uv_layers.active:
+        temp_mesh.calc_tangents(uvmap=temp_mesh.uv_layers.active.name)
+
+    if include_tangeants:
+        print("Extracting TPN data for export...")
+        tpn_data = extract_tpn_for_export(mesh)
+        if tpn_data:
+            mesh_data.tpn_vec = tpn_data
+            print(f"Extracted {len(tpn_data)} TPN vectors for export")
 
     triangles = []
     face_materials = []
@@ -363,6 +377,16 @@ def write_vertex_block(vertices: list[tuple[float, float, float]]) -> bytes:
     
     return header + data
 
+def write_attribute_block(attributes: list[int]) -> bytes:
+    block_size = 12 + (len(attributes) * 4)
+    header = write_directory_header(0xF0000, 1, block_size)
+    
+    data = bytearray()
+    for value in attributes:
+        data.extend(write_uint32_le(value))
+        
+    return header + data
+
 def write_normal_block(normals: list[tuple[float, float, float]]) -> bytes:
     block_size = 12 + (len(normals) * 12)
     header = write_directory_header(0x80000, len(normals), block_size)
@@ -383,6 +407,19 @@ def write_uv_block(uvs: list[tuple[float, float]]) -> bytes:
     for uv in uvs:
         data.extend(write_float_le(uv[0]))
         data.extend(write_float_le(1.0 - uv[1]))
+    
+    return header + data
+
+def write_tpn_vec_block(tpn_vectors: list[tuple[float, float, float, float]]) -> bytes:
+    block_size = 12 + (len(tpn_vectors) * 16)
+    header = write_directory_header(0x120000, len(tpn_vectors), block_size)
+
+    data = bytearray()
+    for vec in tpn_vectors:
+        data.extend(write_float_le(vec[0]))
+        data.extend(write_float_le(vec[1]))
+        data.extend(write_float_le(vec[2]))
+        data.extend(write_float_le(vec[3]))
     
     return header + data
 
@@ -494,6 +531,12 @@ def write_mesh_directory(mesh_data: ParsedMeshData) -> bytes:
 
     if mesh_data.bones_list:
         blocks.append(write_bone_list_block(mesh_data.bones_list))
+    
+    if mesh_data.tpn_vec:
+        blocks.append(write_tpn_vec_block(mesh_data.tpn_vec))
+
+    if mesh_data.attributes:
+        blocks.append(write_attribute_block(mesh_data.attributes))
 
     total_size = 12 + sum(len(block) for block in blocks)
 

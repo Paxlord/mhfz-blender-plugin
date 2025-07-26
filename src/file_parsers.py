@@ -154,6 +154,7 @@ def parse_mesh_directory(buf, off):
     block_start = off + 12
 
     parsed_mesh_data = ParsedMeshData()
+    print(f"Mesh Directory: Type: {mesh_directory.type}, File Count: {mesh_directory.file_count}, Size: {mesh_directory.directory_size}")
 
     for i in range(file_count):
         mesh_data_block_header = parse_directory_header(buf, block_start)
@@ -185,8 +186,6 @@ def parse_mesh_directory(buf, off):
             print(f"Parsing vertex weights for mesh {i}")
             parsed_mesh_data.weights = parse_vertex_weight_block(buf, block_start)
             print(f"Parsed {len(parsed_mesh_data.weights)} vertex weights")
-
-        
 
         if mesh_data_block_header.type == 0x120000:
             parsed_mesh_data.tpn_vec = parse_tpn_vec_block(buf, block_start)
@@ -375,6 +374,7 @@ def parse_directory(buf, off, fmod_data: ParsedFMODData):
         pass
 
     elif directory_header.type == 2:
+        print(f"Mesh directory found: {directory_header.file_count} meshes found")
         file_count = directory_header.file_count
         for i in range(file_count):
             cur_mesh_header = parse_directory_header(buf, directory_data_start)
