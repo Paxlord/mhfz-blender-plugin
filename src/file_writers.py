@@ -87,6 +87,9 @@ def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str], include
 
     if force_empty_attributes:
         empty_block = [65536] + [0] * 17
+        empty_block[1] = 1
+        empty_block[11] = 2
+        empty_block[12] = 3
         mesh_data.attributes = empty_block
 
     temp_mesh = mesh.data.copy()
@@ -551,7 +554,7 @@ def write_material(material_data: ParsedMaterialData) -> bytes:
     block_size = 0x110
     print(f"Material data: {material_data}")
     if material_data.texture_count > 1:
-        block_size += 0x4 * material_data.texture_count
+        block_size += 0x4 * (material_data.texture_count - 1)
 
     header = write_directory_header(2, 1, block_size)
     data = bytearray()
