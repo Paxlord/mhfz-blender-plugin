@@ -95,10 +95,10 @@ def parse_color_block(buf, off):
     cur_off = off + 12
     for i in range(color_block_header.file_count):
         color = (
-            read_float_le(buf, cur_off),
-            read_float_le(buf, cur_off + 4),
-            read_float_le(buf, cur_off + 8),
-            read_float_le(buf, cur_off + 12)
+            read_float_le(buf, cur_off) / 255.0,
+            read_float_le(buf, cur_off + 4) / 255.0,
+            read_float_le(buf, cur_off + 8) / 255.0,
+            read_float_le(buf, cur_off + 12) / 255.0
         )
         colors.append(color)
         cur_off += 16

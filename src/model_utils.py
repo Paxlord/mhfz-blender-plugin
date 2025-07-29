@@ -557,8 +557,8 @@ def extract_tpn_for_export(mesh_obj: bpy.types.Object) -> list[tuple[float, floa
             if length > 0:
                 avg_tangent = [avg_tangent[0]/length, avg_tangent[1]/length, avg_tangent[2]/length]
             
-            tpn_data.append((avg_tangent[0], avg_tangent[1], avg_tangent[2], avg_sign))
+            tpn_data.append((avg_tangent[0], avg_tangent[1], avg_tangent[2], -avg_sign))
         else:
-            tpn_data.append((1.0, 0.0, 0.0, 1.0))
+            tpn_data.append((1.0, 0.0, 0.0, -1.0))
     
     return tpn_data

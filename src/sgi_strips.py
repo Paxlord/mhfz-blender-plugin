@@ -22,7 +22,7 @@ class AdjTriangle:
         return sum(1 for link in self.adj_tri if link is not None)
 
 class Striper:
-    DEBUG = True 
+    DEBUG = False 
 
     def __init__(self):
         self.faces = None

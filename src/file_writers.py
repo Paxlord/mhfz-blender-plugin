@@ -104,15 +104,12 @@ def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str], include
     bm.free()
 
     temp_mesh.update(calc_edges=True)
-
     
     mesh_data.vertices = [(v.co.x, v.co.y, v.co.z) for v in temp_mesh.vertices]
     print(f"Mesh vertices: {len(mesh_data.vertices)}")
-
     
     mesh_data.normals = [(v.normal.x, v.normal.y, v.normal.z) for v in temp_mesh.vertices]
     print(f"Mesh normals: {len(mesh_data.normals)}")
-
     
     if temp_mesh.uv_layers and len(temp_mesh.uv_layers) > 0:
         vert_to_uv = {}
@@ -152,21 +149,43 @@ def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str], include
             mesh_data.tpn_vec = tpn_data
             print(f"Extracted {len(tpn_data)} TPN vectors for export")
 
+    slot_to_global_map = {}
+    for i, mat in enumerate(temp_mesh.materials):
+        if mat and mat.name in material_names:
+            slot_to_global_map[i] = material_names.index(mat.name)
+        else:
+            slot_to_global_map[i] = 0 
+
     triangles = []
     face_materials = []
 
-    for poly in temp_mesh.polygons:
+    mesh_to_global_material_map = {}
+    
+    for slot_idx, material_slot in enumerate(temp_mesh.materials):
+        if material_slot and material_slot.name in material_names:
+            global_mat_idx = material_names.index(material_slot.name)
+            mesh_to_global_material_map[slot_idx] = global_mat_idx
+        else:
+            mesh_to_global_material_map[slot_idx] = 0
 
+    print(f"Mesh materials: {[mat.name if mat else 'None' for mat in temp_mesh.materials]}")
+    print(f"Mesh to global material mapping: {mesh_to_global_material_map}")
+
+    actually_used_materials = set()
+    
+    for poly in temp_mesh.polygons:
         tri = [temp_mesh.loops[i].vertex_index for i in poly.loop_indices]
         triangles.append(tri)
 
-        if poly.material_index < len(material_names):
-            face_materials.append(poly.material_index)
-        else:
-            face_materials.append(0)
+        local_mat_idx = poly.material_index
+        global_mat_idx = mesh_to_global_material_map.get(local_mat_idx, 0)
+        face_materials.append(global_mat_idx)
+        actually_used_materials.add(global_mat_idx)
 
-    print(f"Materials = {temp_mesh.materials}")
-    material_list = list(range(len(temp_mesh.materials)))
+    material_list = sorted(list(actually_used_materials))
+    
+    print(f"Final material_list for mesh: {material_list}")
+    print(f"Face materials (global indices): {set(face_materials)}")
 
     strips = []
     strip_material_indices = []
@@ -175,7 +194,7 @@ def mesh_data_from_mesh(mesh: bpy.types.Mesh, material_names: list[str], include
 
     mesh_data.faces = strips
     mesh_data.material_list = material_list
-    mesh_data.material_indices = strip_material_indices 
+    mesh_data.material_indices = strip_material_indices  
 
     
     if mesh.vertex_groups:
