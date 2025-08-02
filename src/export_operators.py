@@ -82,16 +82,10 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
 
         for material, idx in sorted(materials.items(), key=lambda item: item[1]):
             material_names.append(material.name)
-            
-            
             material_data, texture_blocks = material_and_texture_data_from_material(material, image_dict, global_texture_count, self.force_texture_resize)
             materials_data.append(material_data)
-            
-            
             all_texture_data.extend(texture_blocks)
-
             global_texture_count += len(texture_blocks)
-            
             print(f"Material '{material.name}': created {len(texture_blocks)} texture blocks")
     
         print(f"Generated material data for {len(materials_data)} materials")
@@ -106,11 +100,9 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
             meshes_data.append(mesh_data_from_mesh(mesh, material_names, self.include_bone_list, self.include_attribute_array, self.include_tangents))
         print(f"Generated mesh data for {len(meshes_data)} meshes")
 
-        
         parsed_fmod_data = ParsedFMODData(meshes=meshes_data, textures=all_texture_data, materials=materials_data)
         print("Parsed FMOD data successfully")
 
-        
         armature = collect_scene_armature(context)
         if armature:
             armature_obj = list(armature.keys())[0]

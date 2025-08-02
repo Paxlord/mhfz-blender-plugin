@@ -1,10 +1,15 @@
 import bpy #type: ignore
 import bpy_extras.io_utils #type: ignore
 import os
+import math
 
 from .data_classes import ParsedFMODData, ParsedFSKLData
 from .file_parsers import *
 from .model_utils import *
+
+def maya_to_blender_transform(obj: bpy.types.Object):
+    obj.scale = (0.01, 0.01, 0.01)
+    obj.rotation_euler = (math.radians(90), 0, 0)
 
 def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
     def contains_images(folder_path: str) -> bool:
@@ -184,6 +189,12 @@ class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
                 for mesh_obj in mesh_objects:
                     parent_mesh_to_armature(mesh_obj, armature_obj)
                 print("Parented meshes to armature successfully")
+
+            if armature_obj:
+                maya_to_blender_transform(armature_obj)
+            else:
+                for mesh_obj in mesh_objects:
+                    maya_to_blender_transform(mesh_obj)
 
         except Exception as e:
             self.report({'ERROR'}, str(e))

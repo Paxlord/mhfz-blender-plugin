@@ -380,10 +380,6 @@ def create_armature(armature_name: str, skeleton_data: ParsedFSKLData, scale_fac
         armature_bone = armature_obj.data.bones.get(bone_name)
         if armature_bone:
             armature_bone["part_id"] = bone.part_id
-
-    
-    
-    
     
     return armature_obj
 
