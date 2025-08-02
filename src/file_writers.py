@@ -356,9 +356,9 @@ def fskl_data_from_armature(armature: bpy.types.Object) -> ParsedFSKLData:
         else:
             position_vec = bone.head_local
 
-        unknown_bone_param = 0
-        if "unknown_bone_param" in bone:
-            unknown_bone_param = bone["unknown_bone_param"]
+        part_id = 0
+        if "part_id" in bone:
+            part_id = bone["part_id"]
 
         bone_data = ParsedBoneData(
             node_id=node_id,
@@ -372,7 +372,7 @@ def fskl_data_from_armature(armature: bpy.types.Object) -> ParsedFSKLData:
             translation=(position_vec.x, position_vec.y, position_vec.z),
             transform_flags=1.0,
             unk_int=0xFFFFFFFF,
-            unknown_bone_param=unknown_bone_param,
+            part_id=part_id,
             unk_data=bytes([0] * 184)
         )
         fskl_data.bones.append(bone_data)
@@ -633,7 +633,7 @@ def write_bone_block(bone_data: ParsedBoneData) -> bytes:
     data.extend(write_float_le(bone_data.translation[2]))
     data.extend(write_float_le(bone_data.transform_flags))
     data.extend(write_uint32_le(bone_data.unk_int))
-    data.extend(write_uint32_le(bone_data.unknown_bone_param))
+    data.extend(write_uint32_le(bone_data.part_id))
     data.extend(bone_data.unk_data)
     return data
 

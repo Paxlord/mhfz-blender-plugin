@@ -74,7 +74,7 @@ class ParsedBoneData:
     translation: tuple[float, float, float] | None = None #Relative to the parent bone
     transform_flags: float | None = None #Always 1.0
     unk_int: int | None = None #Always 0xFFFFFFFF
-    unknown_bone_param: int | None = None #can be 0,1,2,3 not sure what it does
+    part_id: int | None = None #can be 0,1,2,3 not sure what it does
     unk_data: bytes | None = None #zeroes
 
 @dataclass

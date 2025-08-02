@@ -379,7 +379,7 @@ def create_armature(armature_name: str, skeleton_data: ParsedFSKLData, scale_fac
         bone_name = f"Bone_{bone.node_id}"
         armature_bone = armature_obj.data.bones.get(bone_name)
         if armature_bone:
-            armature_bone["unknown_bone_param"] = bone.unknown_bone_param
+            armature_bone["part_id"] = bone.part_id
 
     
     
@@ -560,8 +560,8 @@ def apply_animation_to_armature(armature_obj: bpy.types.Object, aan_package: AAN
     max_part_id = -1
     for pose_bone in sorted_pose_bones:
         bone_data = armature_obj.data.bones.get(pose_bone.name)
-        if bone_data and "unknown_bone_param" in bone_data:
-            part_id = bone_data["unknown_bone_param"]
+        if bone_data and "part_id" in bone_data:
+            part_id = bone_data["part_id"]
             bone_buckets[part_id].append(pose_bone)
             max_part_id = max(max_part_id, part_id)
         else:

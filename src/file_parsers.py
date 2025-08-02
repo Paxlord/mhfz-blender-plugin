@@ -333,7 +333,7 @@ def parse_fskl(buf):
         unk_int = read_uint32_le(buf, offset)
         offset += 4
 
-        unk_bone_param = read_uint32_le(buf, offset)
+        part_id = read_uint32_le(buf, offset)
         offset += 4
 
         remaining_size = bone_block_header.directory_size - 84
@@ -359,7 +359,7 @@ def parse_fskl(buf):
             translation=(trans_x,trans_y,trans_z),
             transform_flags=transform_flags,
             unk_int=unk_int,
-            unknown_bone_param=unk_bone_param,    
+            part_id=part_id,    
             unk_data=unk_data
         )
         skeleton_data.bones.append(bone)
@@ -512,7 +512,6 @@ def parse_aan_package(filepath):
                         if props:
                             aan_comp = AANAnimComponent(channel_name=channel_name, type_name=props['name'])
                             
-                            # Keyframes
                             keyframe_data_start = comp_start + 12
                             for k in range(key_count):
                                 key_offset = keyframe_data_start + k * props['size']
