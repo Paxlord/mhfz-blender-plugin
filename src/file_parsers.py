@@ -480,7 +480,7 @@ def parse_aan_package(filepath):
                 if motion_offset == 0xFFFFFFFF:
                     continue
 
-                _, bone_track_count, _, loop_flag, loop_start_frame = struct.unpack_from('<IIIfI', buf, motion_offset)
+                _, bone_track_count, _, loop_flag, loop_start_frame = struct.unpack_from('<IIIIf', buf, motion_offset)
                 aan_motion = AANMotion(
                     part_index=i, 
                     motion_slot_index=j, 

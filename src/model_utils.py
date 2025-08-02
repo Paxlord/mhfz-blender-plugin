@@ -607,6 +607,8 @@ def apply_player_animations(motions_by_part, bone_buckets, euler_factor, scale_f
         upper_slots = set(motions_by_part.get(upper_part, {}).keys())
         lower_slots = set(motions_by_part.get(lower_part, {}).keys())
         all_slots = upper_slots | lower_slots
+
+        
         
         print(f"Part pair ({upper_part},{lower_part}): Found {len(all_slots)} motion slots: {sorted(all_slots)}")
         
@@ -615,6 +617,17 @@ def apply_player_animations(motions_by_part, bone_buckets, euler_factor, scale_f
             action = bpy.data.actions.new(name=action_name)
             print(f"\nCreating Action: {action_name}")
             
+            main_motion = None
+            if upper_part in motions_by_part and motion_slot_index in motions_by_part[upper_part]:
+                main_motion = motions_by_part[upper_part][motion_slot_index]
+            elif lower_part in motions_by_part and motion_slot_index in motions_by_part[lower_part]:
+                main_motion = motions_by_part[lower_part][motion_slot_index]
+
+            if main_motion:
+                action["loops"] = main_motion.loops
+                action["loop_start_frame"] = main_motion.loop_start_frame
+                print(f"  Storing loop info on action: Loops={main_motion.loops}, Start Frame={main_motion.loop_start_frame}")
+
             min_frame = float('inf')
             max_frame = float('-inf')
             
@@ -673,6 +686,10 @@ def apply_monster_animations(motions_by_part, bone_buckets, max_part_id, euler_f
             action_name = f"Motion_{base_part:02d}_{motion_slot_index:02d}"
             action = bpy.data.actions.new(name=action_name)
             print(f"\nCreating Action: {action_name}")
+
+            action["loops"] = base_motion.loops
+            action["loop_start_frame"] = base_motion.loop_start_frame
+            print(f"  Storing loop info on action: Loops={base_motion.loops}, Start Frame={base_motion.loop_start_frame}")
             
             min_frame = float('inf')
             max_frame = float('-inf')
