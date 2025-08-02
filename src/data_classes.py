@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List, Dict, Tuple
 
 @dataclass
 class DirectoryHeader:
@@ -80,3 +81,30 @@ class ParsedBoneData:
 class ParsedFSKLData:
     root_indices: list[int] | None = None
     bones: list[ParsedBoneData] | None = None
+
+@dataclass
+class Keyframe:
+    data: Tuple
+
+@dataclass
+class AANAnimComponent:
+    channel_name: str
+    type_name: str
+    keyframes: List[Keyframe] = field(default_factory=list)
+
+@dataclass
+class AANBoneTrack:
+    animation_mode: int
+    components: List[AANAnimComponent] = field(default_factory=list)
+
+@dataclass
+class AANMotion:
+    part_index: int
+    motion_slot_index: int
+    loops: bool
+    loop_start_frame: float
+    bone_tracks: Dict[int, AANBoneTrack] = field(default_factory=dict)
+
+@dataclass
+class AANPackage:
+    motions: List[AANMotion] = field(default_factory=list)

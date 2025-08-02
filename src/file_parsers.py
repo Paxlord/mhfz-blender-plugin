@@ -431,3 +431,101 @@ def load_texture_no_dupes(parsed_fmod_data, texture_folder):
     print(f"  - Found {len(files)} image files in folder")
     
     return texture_dic
+
+def parse_aan_package(filepath):
+    KEYFRAME_PROPERTIES = {
+        17: {'name': 'LinearShort', 'size': 4, 'format': '<hh'},
+        18: {'name': 'HermiteShort', 'size': 8, 'format': '<hhhh'},
+        19: {'name': 'ComplexShort', 'size': 12, 'format': '<ihhhh'},
+        33: {'name': 'LinearFloat', 'size': 8, 'format': '<ff'},
+        34: {'name': 'HermiteFloat', 'size': 16, 'format': '<ffff'},
+        35: {'name': 'ComplexFloat', 'size': 20, 'format': '<iffff'}
+    }
+
+    SRT_CHANNEL_MAP = {
+        0x01: "scale.x", 0x02: "scale.y", 0x04: "scale.z",
+        0x08: "rotation_euler.x", 
+        0x10: "rotation_euler.y", 
+        0x20: "rotation_euler.z",
+        0x40: "location.x", 
+        0x80: "location.y",
+        0x100: "location.z",
+    }
+    
+    aan_package = AANPackage()
+    with open(filepath, 'rb') as f:
+        buf = f.read() 
+
+        first_motion_count, first_table_offset = struct.unpack_from('<II', buf, 0)
+        num_parts = first_table_offset // 8
+
+        if num_parts <= 0:
+            print(f"Invalid number of parts: {num_parts}. Expected at least 1.")
+            return None
+
+        print(f"Parsing AAN package with {num_parts} parts, first motion count: {first_motion_count}")
+        part_headers = []
+        for i in range(num_parts):
+            motion_count, table_offset = struct.unpack_from('<II', buf, i * 8)
+            part_headers.append({'count': motion_count, 'offset': table_offset})
+
+        for i, part_info in enumerate(part_headers):
+            if part_info['count'] == 0 or part_info['offset'] == 0:
+                continue
+            
+            offset_table_fmt = f'<{part_info["count"]}I'
+            motion_offsets = struct.unpack_from(offset_table_fmt, buf, part_info['offset'])
+            
+            for j, motion_offset in enumerate(motion_offsets):
+                if motion_offset == 0xFFFFFFFF:
+                    continue
+
+                _, bone_track_count, _, loop_flag, loop_start_frame = struct.unpack_from('<IIIfI', buf, motion_offset)
+                aan_motion = AANMotion(
+                    part_index=i, 
+                    motion_slot_index=j, 
+                    loops=(loop_flag != 0), 
+                    loop_start_frame=loop_start_frame
+                )
+                
+                current_offset = motion_offset + 20 
+                
+                for bone_id in range(bone_track_count):
+                    bone_track_start = current_offset
+                    flags, comp_count, _ = struct.unpack_from('<III', buf, bone_track_start)
+                    anim_mode = (flags >> 8) & 0xFF
+                    
+                    aan_bone_track = AANBoneTrack(animation_mode=anim_mode)
+                    
+                    current_offset += 12
+                    
+                    for _ in range(comp_count):
+                        comp_start = current_offset
+                        comp_header, key_count, comp_size = struct.unpack_from('<III', buf, comp_start)
+                        
+                        channel_flag = comp_header & 0x1FF
+                        type_id = (comp_header >> 16) & 0xFF
+                        
+                        channel_name = SRT_CHANNEL_MAP.get(channel_flag, "Unknown")
+                        props = KEYFRAME_PROPERTIES.get(type_id)
+                        
+                        if props:
+                            aan_comp = AANAnimComponent(channel_name=channel_name, type_name=props['name'])
+                            
+                            # Keyframes
+                            keyframe_data_start = comp_start + 12
+                            for k in range(key_count):
+                                key_offset = keyframe_data_start + k * props['size']
+                                key_buffer = buf[key_offset : key_offset + props['size']]
+                                parsed_key_data = struct.unpack(props['format'], key_buffer)
+                                aan_comp.keyframes.append(Keyframe(data=parsed_key_data))
+                            
+                            aan_bone_track.components.append(aan_comp)
+                        
+                        current_offset = comp_start + comp_size
+                        
+                    aan_motion.bone_tracks[bone_id] = aan_bone_track
+                
+                aan_package.motions.append(aan_motion)
+
+    return aan_package

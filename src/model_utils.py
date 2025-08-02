@@ -1,9 +1,9 @@
 import bpy #type: ignore
 from mathutils import Matrix, Vector #type: ignore
+from collections import defaultdict, deque
 
 from .sgi_strips import *
 from .data_classes import *
-
 
 def triangulate_strips(strips: list[list[int]], material_indices: list[int], material_list: list[int]) -> list[int]:
     triangle_indices = []
@@ -55,17 +55,6 @@ def create_simple_strips(triangles: list[list[int]], material_indices: list[int]
     return strips, strip_material_indices
 
 def create_sgi_strips(triangles: list[list[int]], material_indices: list[int], material_list: list[int]) -> tuple[list[list[int]], list[int]]:
-    """
-    Creates optimized triangle strips using the SGI algorithm, respecting material boundaries.
-    
-    Args:
-        triangles: List of all triangles in the mesh.
-        material_indices: List of material indices per triangle.
-        material_list: The material palette to be populated or referenced.
-        
-    Returns:
-        tuple: (list_of_strips, list_of_strip_material_indices)
-    """
     final_strips = []
     final_strip_materials = []
 
@@ -109,8 +98,6 @@ def create_sgi_strips(triangles: list[list[int]], material_indices: list[int], m
     return final_strips, final_strip_materials
 
 def parent_mesh_to_armature(mesh_obj, armature_obj):
-    """Parent a mesh object to an armature object and add an armature modifier."""
-    
     modifier = mesh_obj.modifiers.new(name="Armature", type='ARMATURE')
     modifier.object = armature_obj
     modifier.use_vertex_groups = True
@@ -303,16 +290,6 @@ def create_blender_material(mat_name: str, parsed_material: ParsedMaterialData, 
     if parsed_material.diffuse_rgba:
         principled_bsdf.inputs['Base Color'].default_value = parsed_material.diffuse_rgba
     
-    
-    
-    
-    
-    
-
-    
-    
-
-    
     if parsed_material.texture_diffuse is not None:
         diffuse_texture = nodes.new(type='ShaderNodeTexImage')
         diffuse_texture.location = (-400, 0)
@@ -431,7 +408,6 @@ def collect_scene_texture(context):
     return texture_dict
 
 def texture_dic_to_namelist(texture_dic: dict[bpy.types.Image, int]) -> list[str]:
-    """ Take a texture dicitonary and return a namelist of texture names """
     namelist = []
     for image, idx in texture_dic.items():
         namelist.append(image.name)
@@ -493,7 +469,6 @@ def collect_scene_armature(context):
     return armature_dict
 
 def collect_unique_images(context):
-    """Collect all unique images used in materials across the scene"""
     unique_images = {}
     image_idx = 0
 
@@ -562,3 +537,321 @@ def extract_tpn_for_export(mesh_obj: bpy.types.Object) -> list[tuple[float, floa
             tpn_data.append((1.0, 0.0, 0.0, -1.0))
     
     return tpn_data
+
+def apply_animation_to_armature(armature_obj: bpy.types.Object, aan_package: AANPackage, scale_factor: float, animation_mode: str = "monster"):
+    context = bpy.context
+
+    if not armature_obj or armature_obj.type != 'ARMATURE':
+        print("Target object is not an armature.")
+        return
+
+    for pose_bone in armature_obj.pose.bones:
+        pose_bone.rotation_mode = 'XYZ'
+
+    if not armature_obj.animation_data:
+        armature_obj.animation_data_create()
+
+    context.scene.render.fps = 30
+    print("Set scene framerate to 30 FPS.")
+
+    bone_buckets = defaultdict(list)
+    sorted_pose_bones = sorted(armature_obj.pose.bones, key=lambda b: int(b.name.split('_')[1]))
+
+    max_part_id = -1
+    for pose_bone in sorted_pose_bones:
+        bone_data = armature_obj.data.bones.get(pose_bone.name)
+        if bone_data and "unknown_bone_param" in bone_data:
+            part_id = bone_data["unknown_bone_param"]
+            bone_buckets[part_id].append(pose_bone)
+            max_part_id = max(max_part_id, part_id)
+        else:
+            bone_buckets[0].append(pose_bone)
+            max_part_id = max(max_part_id, 0)
+
+    print(f"Max part ID found: {max_part_id}")
+    print("Created Bone Buckets:")
+    for part_id, bones in bone_buckets.items():
+        print(f"  Bucket {part_id}: {len(bones)} bones - {[b.name for b in bones]}")
+
+    EULER_CONVERSION_FACTOR = 0.00038349521
+    MODEL_IMPORT_SCALE = scale_factor
+
+    CHANNEL_TO_INDEX_MAP = {
+        "location.x": 0, "location.y": 1, "location.z": 2,
+        "rotation_euler.x": 0, "rotation_euler.y": 1, "rotation_euler.z": 2,
+        "scale.x": 0, "scale.y": 1, "scale.z": 2
+    }
+
+    motions_by_part = defaultdict(dict)  
+    for motion in aan_package.motions:
+        motions_by_part[motion.part_index][motion.motion_slot_index] = motion
+
+    print(f"Found motions in parts: {list(motions_by_part.keys())}")
+    
+    if animation_mode == "player":
+        print("Using PLAYER animation mode")
+        apply_player_animations(motions_by_part, bone_buckets, EULER_CONVERSION_FACTOR, MODEL_IMPORT_SCALE, CHANNEL_TO_INDEX_MAP, armature_obj, context)
+    else:
+        print("Using MONSTER animation mode") 
+        apply_monster_animations(motions_by_part, bone_buckets, max_part_id, EULER_CONVERSION_FACTOR, MODEL_IMPORT_SCALE, CHANNEL_TO_INDEX_MAP, armature_obj, context)
+
+def apply_player_animations(motions_by_part, bone_buckets, euler_factor, scale_factor, channel_map, armature_obj, context):
+    part_pairs = []
+    all_parts = sorted(motions_by_part.keys())
+    
+    for i in range(0, max(all_parts) + 1, 2):
+        upper_part = i
+        lower_part = i + 1
+        if upper_part in motions_by_part or lower_part in motions_by_part:
+            part_pairs.append((upper_part, lower_part))
+    
+    print(f"Processing {len(part_pairs)} part pairs: {part_pairs}")
+    
+    for upper_part, lower_part in part_pairs:
+        upper_slots = set(motions_by_part.get(upper_part, {}).keys())
+        lower_slots = set(motions_by_part.get(lower_part, {}).keys())
+        all_slots = upper_slots | lower_slots
+        
+        print(f"Part pair ({upper_part},{lower_part}): Found {len(all_slots)} motion slots: {sorted(all_slots)}")
+        
+        for motion_slot_index in all_slots:
+            action_name = f"Motion_{upper_part:02d}_{lower_part:02d}_{motion_slot_index:02d}"
+            action = bpy.data.actions.new(name=action_name)
+            print(f"\nCreating Action: {action_name}")
+            
+            min_frame = float('inf')
+            max_frame = float('-inf')
+            
+            if upper_part in motions_by_part and motion_slot_index in motions_by_part[upper_part]:
+                upper_motion = motions_by_part[upper_part][motion_slot_index]
+                print(f"  Applying upper body motion from part {upper_part} to bucket 0")
+                success = apply_motion_to_bucket(upper_motion, bone_buckets[0], action, 
+                                               euler_factor, scale_factor, channel_map)
+                if success:
+                    motion_min, motion_max = get_motion_frame_range(upper_motion)
+                    min_frame = min(min_frame, motion_min)
+                    max_frame = max(max_frame, motion_max)
+            else:
+                print(f"  No upper body motion found in part {upper_part}")
+            
+            if lower_part in motions_by_part and motion_slot_index in motions_by_part[lower_part]:
+                lower_motion = motions_by_part[lower_part][motion_slot_index]
+                print(f"  Applying lower body motion from part {lower_part} to bucket 1")
+                success = apply_motion_to_bucket(lower_motion, bone_buckets[1], action,
+                                               euler_factor, scale_factor, channel_map)
+                if success:
+                    motion_min, motion_max = get_motion_frame_range(lower_motion)
+                    min_frame = min(min_frame, motion_min)
+                    max_frame = max(max_frame, motion_max)
+            else:
+                print(f"  No lower body motion found in part {lower_part}")
+            
+            if min_frame != float('inf') and max_frame != float('-inf'):
+                action.frame_range = (min_frame, max_frame)
+                print(f"  Set action frame range: {min_frame} to {max_frame}")
+                
+                if armature_obj.animation_data.action is None:
+                    context.scene.frame_start = int(min_frame)
+                    context.scene.frame_end = int(max_frame)
+                    context.scene.frame_current = int(min_frame)
+                    print(f"  Set scene timeline: {min_frame} to {max_frame}")
+                    armature_obj.animation_data.action = action
+    
+    if armature_obj.animation_data.action is None and bpy.data.actions:
+        armature_obj.animation_data.action = bpy.data.actions[-1]
+
+def apply_monster_animations(motions_by_part, bone_buckets, max_part_id, euler_factor, scale_factor, channel_map, armature_obj, context):
+    expected_parts = (max_part_id + 1) * 2
+    print(f"Expected number of parts in animation file: {expected_parts}")
+    
+    processed_slots = set()
+    
+    for base_part in [0, 1]:
+        if base_part not in motions_by_part:
+            continue
+            
+        for motion_slot_index, base_motion in motions_by_part[base_part].items():
+            if motion_slot_index in processed_slots:
+                continue  
+                
+            action_name = f"Motion_{base_part:02d}_{motion_slot_index:02d}"
+            action = bpy.data.actions.new(name=action_name)
+            print(f"\nCreating Action: {action_name}")
+            
+            min_frame = float('inf')
+            max_frame = float('-inf')
+            
+            current_motion = base_motion
+            bucket_index = 0
+            part_index = base_part
+            
+            print(f"  Processing base motion from part {part_index} for bucket {bucket_index}")
+            success = apply_motion_to_bucket(current_motion, bone_buckets[bucket_index], action, 
+                                           euler_factor, scale_factor, channel_map)
+            if success:
+                motion_min, motion_max = get_motion_frame_range(current_motion)
+                min_frame = min(min_frame, motion_min)
+                max_frame = max(max_frame, motion_max)
+            
+            for bucket_index in range(1, max_part_id + 1):
+                extended_part = base_part + (bucket_index * 2)
+                
+                if extended_part in motions_by_part and motion_slot_index in motions_by_part[extended_part]:
+                    extended_motion = motions_by_part[extended_part][motion_slot_index]
+                    print(f"  Found extended motion in part {extended_part} for bucket {bucket_index}")
+                    
+                    success = apply_motion_to_bucket(extended_motion, bone_buckets[bucket_index], action,
+                                                   euler_factor, scale_factor, channel_map)
+                    if success:
+                        motion_min, motion_max = get_motion_frame_range(extended_motion)
+                        min_frame = min(min_frame, motion_min)
+                        max_frame = max(max_frame, motion_max)
+                else:
+                    print(f"  No extended motion found in part {extended_part} for bucket {bucket_index}")
+            
+            if min_frame != float('inf') and max_frame != float('-inf'):
+                action.frame_range = (min_frame, max_frame)
+                print(f"  Set action frame range: {min_frame} to {max_frame}")
+                
+                if armature_obj.animation_data.action is None:
+                    context.scene.frame_start = int(min_frame)
+                    context.scene.frame_end = int(max_frame)
+                    context.scene.frame_current = int(min_frame)
+                    print(f"  Set scene timeline: {min_frame} to {max_frame}")
+                    armature_obj.animation_data.action = action
+            
+            processed_slots.add(motion_slot_index)
+
+    if armature_obj.animation_data.action is None and bpy.data.actions:
+        armature_obj.animation_data.action = bpy.data.actions[-1]
+        
+    print(f"Player animation import complete. Created actions for all part pairs.")
+
+    if armature_obj.animation_data.action is None and bpy.data.actions:
+        armature_obj.animation_data.action = bpy.data.actions[-1]
+
+def apply_motion_to_bucket(motion, target_bones, action, euler_factor, scale_factor, channel_map):
+    if not target_bones:
+        return False
+        
+    applied_any = False
+    for track_index, bone_track in motion.bone_tracks.items():
+        if track_index >= len(target_bones):
+            print(f"    Warning: Track index {track_index} is out of bounds for bucket (size {len(target_bones)}).")
+            continue
+        
+        pose_bone = target_bones[track_index]
+        print(f"    Applying track {track_index} to bone {pose_bone.name}")
+        
+        for component in bone_track.components:
+            if not component.keyframes:
+                continue
+
+            data_path_base = component.channel_name.split('.')[0]
+            array_index = channel_map[component.channel_name]
+
+            fcurve = action.fcurves.new(data_path=f"pose.bones[\"{pose_bone.name}\"].{data_path_base}", index=array_index)
+            fcurve.keyframe_points.add(count=len(component.keyframes))
+            
+            converted_keys = []
+            for key in component.keyframes:
+                is_short = "Short" in component.type_name
+                
+                value, time, tan_in, tan_out = 0, 0, 0, 0
+                interp_flag = 0x20000
+
+                if "Complex" in component.type_name:
+                    interp_flag, value, time, tan_in, tan_out = key.data
+                elif "Hermite" in component.type_name:
+                    value, time, tan_in, tan_out = key.data
+                elif "Linear" in component.type_name:
+                    value, time = key.data
+                    interp_flag = 0x10000
+
+                frame_number = time
+
+                if is_short:
+                    if "location" in component.channel_name:
+                        value /= 16.0
+                        tan_in /= 16.0
+                        tan_out /= 16.0
+                    elif "rotation_euler" in component.channel_name:
+                        value *= euler_factor
+                        tan_in *= euler_factor
+                        tan_out *= euler_factor
+                    elif "scale" in component.channel_name:
+                        value /= 16.0
+                        tan_in /= 16.0
+                        tan_out /= 16.0
+                else: 
+                    if "location" in component.channel_name:
+                        value *= scale_factor
+                        tan_in *= scale_factor
+                        tan_out *= scale_factor
+
+                float_precision = 6
+                value = round(value, float_precision)
+                tan_in = round(tan_in, float_precision)
+                tan_out = round(tan_out, float_precision)
+                frame_number = round(frame_number)
+
+                converted_keys.append({'time': frame_number, 'value': value, 'tan_in': tan_in, 'tan_out': tan_out, 'interp_flag': interp_flag})
+                
+            for i, key_data in enumerate(converted_keys):
+                kp = fcurve.keyframe_points[i]
+                kp.co = key_data['time'], key_data['value']
+
+                if key_data['interp_flag'] == 0x10000:
+                    kp.interpolation = 'LINEAR'
+                else:
+                    kp.interpolation = 'BEZIER'
+
+                    current_time = key_data['time']
+                    current_value = key_data['value']
+                    
+                    if i > 0:
+                        prev_key = converted_keys[i - 1]
+                        dt = current_time - prev_key['time']
+                        
+                        left_handle_x = current_time - dt / 3.0
+                        left_handle_y = current_value - (key_data['tan_in'] * dt / 3.0)
+                        kp.handle_left = (left_handle_x, left_handle_y)
+                    else:
+                        kp.handle_left = (current_time, current_value)
+                    
+                    if i < len(converted_keys) - 1:
+                        next_key = converted_keys[i + 1]
+                        dt = next_key['time'] - current_time
+                        
+                        right_handle_x = current_time + dt / 3.0
+                        right_handle_y = current_value + (key_data['tan_out'] * dt / 3.0)
+                        kp.handle_right = (right_handle_x, right_handle_y)
+                    else:
+                        kp.handle_right = (current_time, current_value)
+
+
+            fcurve.update()
+            applied_any = True
+    
+    return applied_any
+
+def get_motion_frame_range(motion):
+    min_frame = float('inf')
+    max_frame = float('-inf')
+    
+    for bone_track in motion.bone_tracks.values():
+        for component in bone_track.components:
+            for key in component.keyframes:
+                if "Complex" in component.type_name:
+                    time = key.data[2]
+                elif "Hermite" in component.type_name:
+                    time = key.data[1]
+                elif "Linear" in component.type_name:
+                    time = key.data[1]
+                else:
+                    continue
+                    
+                min_frame = min(min_frame, time)
+                max_frame = max(max_frame, time)
+    
+    return min_frame if min_frame != float('inf') else 0, max_frame if max_frame != float('-inf') else 0
