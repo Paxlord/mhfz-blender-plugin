@@ -58,7 +58,8 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
 
     export_type_items = [
         ('WEAPON', "Weapon", "Exports with a weapon folder structure"),
-        ('ARMOR', "Armor", "Exports with an armor folder structure")
+        ('ARMOR', "Armor", "Exports with an armor folder structure"),
+        ('MONSTER', "Monster", "Exports with a monster folder structure"),
     ]
     export_type: bpy.props.EnumProperty(
         name="Export Type",
@@ -127,16 +128,22 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         
         directory = os.path.dirname(self.filepath)
         export_directory = os.path.join(directory, file_name)
+
         if not os.path.exists(export_directory):
             os.makedirs(export_directory)
             print(f"Created directory: {export_directory}")
 
-        
-        fmod_name = "0001_0000001C.fmod"
-        fmod_name_no_ext = fmod_name.split(".")[0]
-        self.filepath = os.path.join(export_directory, fmod_name)
+        model_directory_name = "0000"
+        if self.export_type == "MONSTER":
+            if not os.path.exists(os.path.join(export_directory, model_directory_name)):
+                os.makedirs(os.path.join(export_directory, model_directory_name))
+                print(f"Created directory: {os.path.join(export_directory, model_directory_name)}")
 
-        
+        fmod_name = "0001_0000001C.fmod"
+        self.filepath = os.path.join(export_directory, fmod_name)
+        if self.export_type == "MONSTER":
+            self.filepath = os.path.join(export_directory, model_directory_name, fmod_name)
+
         with open(self.filepath, 'wb') as fmod_file:
             fmod_file.write(fmod_buffer)
             print(f"Exported FMOD data to {self.filepath}")
@@ -146,7 +153,9 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         texture_unique_id = texture_unique_id.zfill(8)
         
         texture_directory_name = f"0003_{texture_unique_id}"
-        
+        if self.export_type == "MONSTER":
+            texture_directory_name = f"0002"
+
         texture_directory_path = os.path.join(export_directory, texture_directory_name)
         if self.export_type == "ARMOR":
             texture_directory_path = export_directory
@@ -203,7 +212,6 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
                 
                 if is_copy:
                     bpy.data.images.remove(image_to_save, do_unlink=True)
-
         
         fskl_name = None
         if parsed_fskl_data:
@@ -212,12 +220,11 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
             fskl_name = f"0002_{fskl_rand_id}"
             fskl_file_name = f"{fskl_name}.fskl"
             fskl_path = os.path.join(export_directory, fskl_file_name)
+            if self.export_type == "MONSTER":
+                fskl_path = os.path.join(export_directory, model_directory_name, fskl_file_name)
             with open(fskl_path, 'wb') as fskl_file:
                 fskl_file.write(fskl_buffer)
                 print(f"Exported skeleton data to {fskl_path}")
-
-        
-        
         
         if self.write_log_files:
             with open(os.path.join(texture_directory_path, f"{texture_directory_name}.log"), 'w') as log_file:
