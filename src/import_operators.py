@@ -229,6 +229,12 @@ class ImportAAN(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
         default=1.0, 
     ) # type: ignore
 
+    apply_euler_filter: bpy.props.BoolProperty(
+        name="Apply Euler Filter",
+        description="Automatically clean rotation curves to reduce wobbling and gimbal lock issues. Highly recommended.",
+        default=True,
+    ) # type: ignore
+
     def execute(self, context):
         active_obj = context.view_layer.objects.active
         if not active_obj or active_obj.type != 'ARMATURE':
@@ -240,7 +246,7 @@ class ImportAAN(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
             aan_package = parse_aan_package(self.filepath)
             print(f"Found {len(aan_package.motions)} total motion variations (Part/Slot combos).")
             
-            apply_animation_to_armature(active_obj, aan_package, self.model_scale, self.animation_type)
+            apply_animation_to_armature(active_obj, aan_package, self.model_scale, self.animation_type, self.apply_euler_filter )
             
             print("Successfully applied animation data.")
 

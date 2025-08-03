@@ -18,6 +18,7 @@ classes = (
     ImportFMOD,
     ExportFMOD,
     ImportAAN,
+    ExportAAN, 
     ui_panels.FMOD_SetupProperties,
     ui_panels.FMOD_OT_SetupMesh, 
     ui_panels.FMOD_PT_SetupPanel,
@@ -30,6 +31,7 @@ def menu_func_import(self, context):
 
 def menu_func_export(self, context):
     self.layout.operator(export_operators.ExportFMOD.bl_idname, text="FMOD (.fmod)")
+    self.layout.operator(ExportAAN.bl_idname, text="MHFZ Animation (.bin)")
     pass
 
 def register():

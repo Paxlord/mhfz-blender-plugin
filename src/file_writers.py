@@ -787,3 +787,143 @@ def material_and_texture_data_from_material(material: bpy.types.Material, image_
     )
 
     return parsed_material_data, texture_blocks
+
+
+
+def _write_keyframe_data(keyframe: Keyframe, type_name: str) -> bytes:
+    if type_name == 'LinearFloat':
+        value, time = keyframe.data
+        return write_float_le(value) + write_float_le(time)
+    elif type_name == 'HermiteFloat':
+        value, time, tan_in, tan_out = keyframe.data
+        return write_float_le(value) + write_float_le(time) + write_float_le(tan_in) + write_float_le(tan_out)
+    else:
+        return b''
+
+def _write_aan_component(comp: AANAnimComponent) -> tuple[bytes, int]:
+    keyframe_buffer = bytearray()
+    for key in comp.keyframes:
+        keyframe_buffer.extend(_write_keyframe_data(key, comp.type_name))
+    
+    size_on_disk = 12 + len(keyframe_buffer)
+    
+    type_id = 0
+    if comp.type_name == 'LinearFloat':
+        type_id = 33
+    elif comp.type_name == 'HermiteFloat':
+        type_id = 34
+    
+    channel_flag = CHANNEL_NAME_TO_FLAG_MAP.get(comp.channel_name, 0)
+    
+    flags_type_and_channel = 0x80000000 | (type_id << 16) | channel_flag
+    
+    header = (
+        write_uint32_le(flags_type_and_channel) +
+        write_uint32_le(len(comp.keyframes)) +
+        write_uint32_le(size_on_disk)
+    )
+    
+    return header + keyframe_buffer, channel_flag
+
+def _write_aan_bone_track(track: AANBoneTrack) -> bytes:
+    components_buffer = bytearray()
+    srt_summary_mask = 0
+    
+    sorted_components = sorted(track.components, key=lambda c: CHANNEL_NAME_TO_FLAG_MAP.get(c.channel_name, 0))
+
+    for comp in sorted_components:
+        component_bytes, channel_flag = _write_aan_component(comp)
+        components_buffer.extend(component_bytes)
+        srt_summary_mask |= channel_flag
+        
+    bonetrack_size = 12 + len(components_buffer)
+    flags_and_srt_mask = 0x80000000 | srt_summary_mask
+
+    header = (
+        write_uint32_le(flags_and_srt_mask) +
+        write_uint32_le(len(track.components)) +
+        write_uint32_le(bonetrack_size)
+    )
+    
+    return header + components_buffer
+
+def _write_aan_motion_block(motion: AANMotion) -> bytes:
+    bone_tracks_buffer = bytearray()
+    
+    for bone_id in sorted(motion.bone_tracks.keys()):
+        track = motion.bone_tracks[bone_id]
+        bone_tracks_buffer.extend(_write_aan_bone_track(track))
+        
+    block_size = 20 + len(bone_tracks_buffer)
+    
+    flags_and_mode = 0x80000000 | 1
+    loop_flag = 1 if motion.loops else 0
+    
+    header = (
+        write_uint32_le(flags_and_mode) +
+        write_uint32_le(len(motion.bone_tracks)) +
+        write_uint32_le(block_size) +
+        write_uint32_le(loop_flag) +
+        write_float_le(motion.loop_start_frame)
+    )
+    
+    return header + bone_tracks_buffer
+
+def write_aan_package(aan_package: AANPackage) -> bytes:
+    if not aan_package.motions:
+        return b''
+
+    motions_by_part = {}
+    for motion in aan_package.motions:
+        if motion.part_index not in motions_by_part:
+            motions_by_part[motion.part_index] = []
+        motions_by_part[motion.part_index].append(motion)
+
+    num_parts = max(motions_by_part.keys()) + 1 if motions_by_part else 0
+
+    MOTION_SLOT_COUNT = 100
+    part_offset_tables = {}
+    offset_tables_total_size = 0
+    for i in range(num_parts):
+        if i in motions_by_part:
+            part_offset_tables[i] = [0xFFFFFFFF] * MOTION_SLOT_COUNT
+            offset_tables_total_size += MOTION_SLOT_COUNT * 4
+
+    part_header_array_size = num_parts * 8
+    motion_data_start_offset = part_header_array_size + offset_tables_total_size
+
+    motion_data_buffer = bytearray()
+    current_motion_offset = motion_data_start_offset
+    
+    sorted_part_indices = sorted(motions_by_part.keys())
+    for part_idx in sorted_part_indices:
+        sorted_motions = sorted(motions_by_part[part_idx], key=lambda m: m.motion_slot_index)
+        for motion in sorted_motions:
+            if motion.motion_slot_index < MOTION_SLOT_COUNT:
+                part_offset_tables[part_idx][motion.motion_slot_index] = current_motion_offset
+                
+                motion_block_bytes = _write_aan_motion_block(motion)
+                
+                motion_data_buffer.extend(motion_block_bytes)
+                current_motion_offset += len(motion_block_bytes)
+
+    final_buffer = bytearray()
+    
+    current_table_offset = part_header_array_size
+    for i in range(num_parts):
+        if i in motions_by_part:
+            final_buffer.extend(write_uint32_le(MOTION_SLOT_COUNT))
+            final_buffer.extend(write_uint32_le(current_table_offset))
+            current_table_offset += MOTION_SLOT_COUNT * 4
+        else:
+            final_buffer.extend(write_uint32_le(0))
+            final_buffer.extend(write_uint32_le(0))
+            
+    for i in range(num_parts):
+        if i in part_offset_tables:
+            for offset in part_offset_tables[i]:
+                final_buffer.extend(write_uint32_le(offset))
+
+    final_buffer.extend(motion_data_buffer)
+    
+    return bytes(final_buffer)

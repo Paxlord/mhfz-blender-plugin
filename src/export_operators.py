@@ -245,3 +245,143 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
                 log_file.write(f"{texture_directory_name}.bin,12,13526,1196314761\n")
 
         return {'FINISHED'}
+    
+class ExportAAN(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
+    bl_idname = "export_scene.aan"
+    bl_label = "Export MHFZ Animation (.bin)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filename_ext = ".bin"
+
+    filter_glob: bpy.props.StringProperty(
+        default="*.bin",
+        options={'HIDDEN'},
+        maxlen=255,
+    ) # type: ignore
+
+    animation_type: bpy.props.EnumProperty(
+        name="Animation Type",
+        description="Type of animation system to export",
+        items=[
+            ('monster', "Monster", "Use monster animation system (paired parts)"),
+            ('player', "Player", "Use player animation system (upper/lower body split)"),
+        ],
+        default='monster',
+    ) # type: ignore
+
+    model_scale: bpy.props.FloatProperty(
+        name="Model Scale",
+        description="The global scale factor used when importing the model. This value is needed to correctly invert animation scaling on export.",
+        default=0.01,
+    ) # type: ignore
+
+    target_armature: bpy.props.StringProperty(
+        name="Armature",
+        description="Name of the armature to export animations from",
+    ) # type: ignore
+
+    def invoke(self, context, event):
+        active_obj = context.view_layer.objects.active
+        if active_obj and active_obj.type == 'ARMATURE':
+            self.target_armature = active_obj.name
+        
+        return super().invoke(context, event)
+
+    def execute(self, context):
+        armature_obj = bpy.data.objects.get(self.target_armature)
+        if not armature_obj or armature_obj.type != 'ARMATURE':
+            self.report({'ERROR'}, f"Armature '{self.target_armature}' not found or is not an Armature object.")
+            return {'CANCELLED'}
+
+        print(f"Starting AAN export for armature '{armature_obj.name}'")
+        
+        bone_buckets = defaultdict(list)
+        sorted_bones = sorted(armature_obj.data.bones, key=lambda b: int(b.name.split('_')[1]))
+        
+        for bone_data in sorted_bones:
+            if "part_id" in bone_data:
+                part_id = bone_data["part_id"]
+                bone_buckets[part_id].append(bone_data.name)
+            else:
+                bone_buckets[0].append(bone_data.name)
+        
+        sorted_bucket_part_ids = sorted(bone_buckets.keys())
+        
+        bone_to_bucket_map = {}
+        for bucket_idx, bucket_part_id in enumerate(sorted_bucket_part_ids):
+            for bone_idx_in_bucket, bone_name in enumerate(bone_buckets[bucket_part_id]):
+                bone_to_bucket_map[bone_name] = (bucket_idx, bone_idx_in_bucket)
+        
+        print(f"Created {len(bone_buckets)} bone buckets.")
+
+        aan_package = AANPackage()
+        
+        for action in bpy.data.actions:
+            parsed_name = parse_action_name(action.name)
+            if not parsed_name:
+                continue
+            
+            part_indices, motion_slot = parsed_name
+            print(f"Processing action '{action.name}' for motion slot {motion_slot}")
+
+            anim_data_by_bucket = get_animation_data_from_action(action, bone_to_bucket_map, self.model_scale)
+
+            if self.animation_type == 'player':
+                for bucket_idx, part_id in enumerate(part_indices):
+                    bucket_part_id = sorted_bucket_part_ids[bucket_idx]
+                    num_bones_in_bucket = len(bone_buckets[bucket_part_id])
+                    
+                    animated_bones_data = anim_data_by_bucket.get(bucket_idx, {})
+
+                    motion = AANMotion(
+                        part_index=part_id,
+                        motion_slot_index=motion_slot,
+                        loops=action.get("loops", False),
+                        loop_start_frame=action.get("loop_start_frame", 0.0),
+                    )
+
+                    for i in range(num_bones_in_bucket):
+                        if i in animated_bones_data:
+                            components = animated_bones_data[i]
+                            motion.bone_tracks[i] = AANBoneTrack(animation_mode=1, components=components)
+                        else:
+                            motion.bone_tracks[i] = AANBoneTrack(animation_mode=1, components=[])
+                    
+                    aan_package.motions.append(motion)
+
+            elif self.animation_type == 'monster':
+                base_part = part_indices[0]
+                
+                for bucket_idx, bucket_part_id in enumerate(sorted_bucket_part_ids):
+                    num_bones_in_bucket = len(bone_buckets[bucket_part_id])
+                    part_index = base_part + (bucket_idx * 2)
+                    animated_bones_data = anim_data_by_bucket.get(bucket_idx, {})
+
+                    motion = AANMotion(
+                        part_index=part_index,
+                        motion_slot_index=motion_slot,
+                        loops=action.get("loops", False),
+                        loop_start_frame=action.get("loop_start_frame", 0.0),
+                    )
+                    
+                    for i in range(num_bones_in_bucket):
+                        if i in animated_bones_data:
+                            components = animated_bones_data[i]
+                            motion.bone_tracks[i] = AANBoneTrack(animation_mode=1, components=components)
+                        else:
+                            motion.bone_tracks[i] = AANBoneTrack(animation_mode=1, components=[])
+
+        if not aan_package.motions:
+            self.report({'WARNING'}, "No valid actions found to export.")
+            return {'CANCELLED'}
+
+        try:
+            binary_data = write_aan_package(aan_package)
+            with open(self.filepath, 'wb') as f:
+                f.write(binary_data)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to write file: {e}")
+            return {'CANCELLED'}
+
+        self.report({'INFO'}, f"Successfully exported animation data to {self.filepath}")
+        return {'FINISHED'}
