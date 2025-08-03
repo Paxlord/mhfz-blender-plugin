@@ -6,7 +6,6 @@ from .file_writers import *
 from .model_utils import *
 
 class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
-    """Export model, textures, materials and skeleton to FMOD"""
     bl_idname = "export_scene.fmod"
     bl_label = "Export FMOD"
     bl_options = {'REGISTER', 'UNDO'}
@@ -191,9 +190,9 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
                         is_copy = True
 
                 
-                temp_scene = bpy.data.scenes.new("RGB_Export")
+                temp_scene = bpy.data.scenes.new("PNG_Export")
                 temp_scene.render.image_settings.file_format = 'PNG'
-                temp_scene.render.image_settings.color_mode = 'RGB'
+                temp_scene.render.image_settings.color_mode = 'RGBA'
                 temp_scene.render.image_settings.color_depth = '8'
                 temp_scene.render.image_settings.compression = 15
                 
