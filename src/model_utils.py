@@ -1,4 +1,5 @@
-import bpy #type: ignore
+import bpy
+from numpy import mat #type: ignore
 from mathutils import Matrix, Vector #type: ignore
 from collections import defaultdict, deque
 
@@ -277,7 +278,8 @@ def create_blender_material(mat_name: str, parsed_material: ParsedMaterialData, 
     mat = bpy.data.materials.new(name=mat_name)
     mat.use_nodes = True
 
-    mat.blend_method = 'HASHED'
+    mat.blend_method = 'CLIP'
+    mat.alpha_threshold = 0.5
 
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
@@ -301,7 +303,9 @@ def create_blender_material(mat_name: str, parsed_material: ParsedMaterialData, 
         diffuse_texture.location = (-400, 0)
         diffuse_texture.image = texture_dic.get(parsed_material.texture_diffuse)
         links.new(diffuse_texture.outputs['Color'], principled_bsdf.inputs['Base Color'])
-
+        links.new(diffuse_texture.outputs['Alpha'], principled_bsdf.inputs['Alpha'])
+        if diffuse_texture.image:
+            diffuse_texture.image.alpha_mode = 'CHANNEL_PACKED'
     
     if parsed_material.texture_normal is not None:
         normal_texture = nodes.new(type='ShaderNodeTexImage')
