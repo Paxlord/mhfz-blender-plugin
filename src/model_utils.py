@@ -544,7 +544,7 @@ def extract_tpn_for_export(mesh_obj: bpy.types.Object) -> list[tuple[float, floa
     
     return tpn_data
 
-def apply_animation_to_armature(armature_obj: bpy.types.Object, aan_package: AANPackage, scale_factor: float, animation_mode: str = "monster", apply_filter: bool = True):
+def apply_animation_to_armature(armature_obj: bpy.types.Object, aan_package: AANPackage, scale_factor: float, animation_mode: str = "monster"):
     context = bpy.context
 
     if not armature_obj or armature_obj.type != 'ARMATURE':
@@ -596,12 +596,12 @@ def apply_animation_to_armature(armature_obj: bpy.types.Object, aan_package: AAN
     
     if animation_mode == "player":
         print("Using PLAYER animation mode")
-        apply_player_animations(motions_by_part, bone_buckets, EULER_CONVERSION_FACTOR, MODEL_IMPORT_SCALE, CHANNEL_TO_INDEX_MAP, armature_obj, context, apply_filter)
+        apply_player_animations(motions_by_part, bone_buckets, EULER_CONVERSION_FACTOR, MODEL_IMPORT_SCALE, CHANNEL_TO_INDEX_MAP, armature_obj, context)
     else:
         print("Using MONSTER animation mode") 
-        apply_monster_animations(motions_by_part, bone_buckets, max_part_id, EULER_CONVERSION_FACTOR, MODEL_IMPORT_SCALE, CHANNEL_TO_INDEX_MAP, armature_obj, context, apply_filter)
+        apply_monster_animations(motions_by_part, bone_buckets, max_part_id, EULER_CONVERSION_FACTOR, MODEL_IMPORT_SCALE, CHANNEL_TO_INDEX_MAP, armature_obj, context)
 
-def apply_player_animations(motions_by_part, bone_buckets, euler_factor, scale_factor, channel_map, armature_obj, context, apply_filter):
+def apply_player_animations(motions_by_part, bone_buckets, euler_factor, scale_factor, channel_map, armature_obj, context):
     part_pairs = []
     all_parts = sorted(motions_by_part.keys())
     
@@ -668,9 +668,6 @@ def apply_player_animations(motions_by_part, bone_buckets, euler_factor, scale_f
             if min_frame != float('inf') and max_frame != float('-inf'):
                 action.frame_range = (min_frame, max_frame)
                 print(f"  Set action frame range: {min_frame} to {max_frame}")
-
-                if apply_filter:
-                    _apply_euler_filter_to_action(action)
                 
                 if armature_obj.animation_data.action is None:
                     context.scene.frame_start = int(min_frame)
@@ -682,7 +679,7 @@ def apply_player_animations(motions_by_part, bone_buckets, euler_factor, scale_f
     if armature_obj.animation_data.action is None and bpy.data.actions:
         armature_obj.animation_data.action = bpy.data.actions[-1]
 
-def apply_monster_animations(motions_by_part, bone_buckets, max_part_id, euler_factor, scale_factor, channel_map, armature_obj, context, apply_filter):
+def apply_monster_animations(motions_by_part, bone_buckets, max_part_id, euler_factor, scale_factor, channel_map, armature_obj, context):
     expected_parts = (max_part_id + 1) * 2
     print(f"Expected number of parts in animation file: {expected_parts}")
     
@@ -738,9 +735,6 @@ def apply_monster_animations(motions_by_part, bone_buckets, max_part_id, euler_f
             if min_frame != float('inf') and max_frame != float('-inf'):
                 action.frame_range = (min_frame, max_frame)
                 print(f"  Set action frame range: {min_frame} to {max_frame}")
-
-                if apply_filter:
-                    _apply_euler_filter_to_action(action)
                 
                 if armature_obj.animation_data.action is None:
                     context.scene.frame_start = int(min_frame)
@@ -914,28 +908,6 @@ def parse_action_name(action_name: str) -> tuple[list[int], int] | None:
     except (ValueError, IndexError):
         return None
     
-def _apply_euler_filter_to_action(action: bpy.types.Action):
-    if not action or not action.fcurves:
-        return
-
-    original_selection = {fcurve: fcurve.select for fcurve in action.fcurves}
-
-    for fcurve in action.fcurves:
-        fcurve.select = False
-        if "rotation_euler" in fcurve.data_path:
-            fcurve.select = True
-
-    try:
-        bpy.ops.graph.euler_filter()
-        print(f"  Applied Euler Filter to action '{action.name}'.")
-    except Exception as e:
-        print(f"  Warning: Could not apply Euler Filter to action '{action.name}'. Operator failed: {e}")
-    finally:
-        # Restore original selection state
-        for fcurve, is_selected in original_selection.items():
-            if fcurve: # Check if fcurve still exists
-                fcurve.select = is_selected
-
 def get_animation_data_from_action(
     action: bpy.types.Action, 
     bone_to_bucket_map: dict[str, tuple[int, int]], 
