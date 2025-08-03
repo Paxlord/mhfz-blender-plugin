@@ -830,16 +830,21 @@ def apply_motion_to_bucket(motion, target_bones, action, euler_factor, scale_fac
                     kp.interpolation = 'LINEAR'
                 else:
                     kp.interpolation = 'BEZIER'
+                    kp.handle_left_type = 'FREE'
+                    kp.handle_right_type = 'FREE'
 
                     current_time = key_data['time']
                     current_value = key_data['value']
-                    
+                    game_tan_in = key_data['tan_in']
+                    game_tan_out = key_data['tan_out']
+
                     if i > 0:
                         prev_key = converted_keys[i - 1]
                         dt = current_time - prev_key['time']
                         
-                        left_handle_x = current_time - dt / 3.0
-                        left_handle_y = current_value - (key_data['tan_in'] * dt / 3.0)
+                        handle_time_offset = dt / 3.0
+                        left_handle_x = current_time - handle_time_offset
+                        left_handle_y = current_value - (game_tan_in * handle_time_offset)
                         kp.handle_left = (left_handle_x, left_handle_y)
                     else:
                         kp.handle_left = (current_time, current_value)
@@ -848,11 +853,20 @@ def apply_motion_to_bucket(motion, target_bones, action, euler_factor, scale_fac
                         next_key = converted_keys[i + 1]
                         dt = next_key['time'] - current_time
                         
-                        right_handle_x = current_time + dt / 3.0
-                        right_handle_y = current_value + (key_data['tan_out'] * dt / 3.0)
+                        handle_time_offset = dt / 3.0
+                        right_handle_x = current_time + handle_time_offset
+                        right_handle_y = current_value + (game_tan_out * handle_time_offset)
                         kp.handle_right = (right_handle_x, right_handle_y)
                     else:
                         kp.handle_right = (current_time, current_value)
+
+            fcurve.update()
+            applied_any = True
+            
+            for kp in fcurve.keyframe_points:
+                if kp.interpolation == 'BEZIER':
+                    kp.handle_left_type = 'FREE'
+                    kp.handle_right_type = 'FREE'
 
 
             fcurve.update()
@@ -956,17 +970,43 @@ def get_animation_data_from_action(
                 key_data = (value, time)
                 keyframes.append(Keyframe(data=key_data))
             else:
-                dx_in = kp.co.x - kp.handle_left.x
-                dy_in = kp.co.y - kp.handle_left.y
-                if 'location' in channel_name:
-                    dy_in /= model_scale
-                tan_in = (dy_in / dx_in) if dx_in != 0 else 0.0
+                current_time = kp.co.x
+                current_value = kp.co.y 
+                
+                if i > 0:
+                    prev_kp = fcurve.keyframe_points[i - 1]
+                    dt = current_time - prev_kp.co.x
+                    
+                    expected_handle_time = dt / 3.0
+                    actual_handle_dy = current_value - kp.handle_left.y
+                    
+                    if expected_handle_time != 0:
+                        tan_in = actual_handle_dy / expected_handle_time
+                    else:
+                        tan_in = 0.0
+                else:
+                    tan_in = 0.0
 
-                dx_out = kp.handle_right.x - kp.co.x
-                dy_out = kp.handle_right.y - kp.co.y
+                if i < len(fcurve.keyframe_points) - 1:
+                    next_kp = fcurve.keyframe_points[i + 1]
+                    dt = next_kp.co.x - current_time
+                    
+                    expected_handle_time = dt / 3.0
+                    actual_handle_dy = kp.handle_right.y - current_value
+                    
+                    if expected_handle_time != 0:
+                        tan_out = actual_handle_dy / expected_handle_time
+                    else:
+                        tan_out = 0.0
+                else:
+                    tan_out = 0.0
+                
                 if 'location' in channel_name:
-                    dy_out /= model_scale
-                tan_out = (dy_out / dx_out) if dx_out != 0 else 0.0
+                    tan_in /= model_scale
+                    tan_out /= model_scale
+                
+                tan_in = round(tan_in, 6)
+                tan_out = round(tan_out, 6)
                 
                 key_data = (value, time, tan_in, tan_out)
                 keyframes.append(Keyframe(data=key_data))
