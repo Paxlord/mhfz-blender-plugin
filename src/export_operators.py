@@ -271,7 +271,7 @@ class ExportAAN(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
     model_scale: bpy.props.FloatProperty(
         name="Model Scale",
         description="The global scale factor used when importing the model. This value is needed to correctly invert animation scaling on export.",
-        default=0.01,
+        default=1.0,
     ) # type: ignore
 
     target_armature: bpy.props.StringProperty(
@@ -369,6 +369,8 @@ class ExportAAN(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
                             motion.bone_tracks[i] = AANBoneTrack(animation_mode=1, components=components)
                         else:
                             motion.bone_tracks[i] = AANBoneTrack(animation_mode=1, components=[])
+
+                    aan_package.motions.append(motion)
 
         if not aan_package.motions:
             self.report({'WARNING'}, "No valid actions found to export.")

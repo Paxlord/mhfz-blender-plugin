@@ -690,9 +690,6 @@ def apply_monster_animations(motions_by_part, bone_buckets, max_part_id, euler_f
             continue
             
         for motion_slot_index, base_motion in motions_by_part[base_part].items():
-            if motion_slot_index in processed_slots:
-                continue  
-                
             action_name = f"Motion_{base_part:02d}_{motion_slot_index:02d}"
             action = bpy.data.actions.new(name=action_name)
             print(f"\nCreating Action: {action_name}")
