@@ -21,6 +21,7 @@ classes = (
     ExportAAN, 
     ui_panels.FMOD_SetupProperties,
     ui_panels.FMOD_OT_SetupMesh, 
+    ui_panels.FMOD_OT_ImportPlayerBase, 
     ui_panels.FMOD_PT_SetupPanel,
 
 )

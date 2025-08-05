@@ -1,7 +1,8 @@
 import bpy # type: ignore
 from bpy.props import EnumProperty, StringProperty # type: ignore
-from bpy.types import Panel, PropertyGroup # type: ignore
+from bpy.types import Panel, PropertyGroup, Operator # type: ignore
 from .setup_tools import *
+import os
 
 def get_mesh_items(self, context):
     items = [('NONE', 'Select Mesh...', 'No mesh selected')]
@@ -189,6 +190,10 @@ class FMOD_PT_SetupPanel(Panel):
     def draw(self, context):
         layout = self.layout
         setup_props = context.scene.fmod_setup_props
+
+        box = layout.box()
+        box.label(text="Assets:", icon='ASSET_MANAGER')
+        box.operator("fmod.import_player_base", text="Import Player Base", icon='ADD')
         
         layout.label(text="Prepare Mesh for FMOD Export", icon='TOOL_SETTINGS')
         layout.separator()
@@ -223,10 +228,61 @@ class FMOD_PT_SetupPanel(Panel):
             col.label(text="Please fill all fields above", icon='INFO')
             col.operator("fmod.setup_mesh", text="Setup FMOD Mesh", icon='X').enabled = False
 
+class FMOD_OT_ImportPlayerBase(Operator):
+    bl_idname = "fmod.import_player_base"
+    bl_label = "Import Player Base"
+    bl_description = "Imports a default player model (armature & meshes) for animation work"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        script_dir = os.path.dirname(__file__)
+        blend_file_path = os.path.join(script_dir, "templates", "base_player_male.blend")
+
+        if not os.path.exists(blend_file_path):
+            self.report({'ERROR'}, f"Player base file not found. Expected at: {blend_file_path}")
+            return {'CANCELLED'}
+
+        collection_name = "PlayerBase"
+
+        try:
+            with bpy.data.libraries.load(blend_file_path, link=False, relative=False) as (data_from, data_to):
+                if collection_name in data_from.collections:
+                    data_to.collections = [collection_name]
+                else:
+                    self.report({'WARNING'}, f"Collection '{collection_name}' not found. Appending all objects.")
+                    data_to.objects = data_from.objects
+            
+            linked_something = False
+            if data_to.collections:
+                for coll in data_to.collections:
+                    if coll:
+                        context.scene.collection.children.link(coll)
+                        linked_something = True
+                self.report({'INFO'}, f"Imported collection '{collection_name}' from player base model.")
+            elif data_to.objects:
+                for obj in data_to.objects:
+                    if obj:
+                        context.scene.collection.objects.link(obj)
+                        linked_something = True
+                self.report({'INFO'}, "Imported all objects from player base model.")
+            
+            if not linked_something:
+                self.report({'WARNING'}, "No data was imported from the player base model file.")
+                return {'CANCELLED'}
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.report({'ERROR'}, f"Failed to import player base model: {str(e)}")
+            return {'CANCELLED'}
+
+        return {'FINISHED'}
+
 # Registration
 classes = (
     FMOD_SetupProperties,
     FMOD_OT_SetupMesh,
+    FMOD_OT_ImportPlayerBase, 
     FMOD_PT_SetupPanel,
 )
 
