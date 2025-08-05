@@ -377,7 +377,7 @@ class ExportAAN(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
             return {'CANCELLED'}
 
         try:
-            binary_data = write_aan_package(aan_package)
+            binary_data = write_aan_package(aan_package, self.animation_type)
             with open(self.filepath, 'wb') as f:
                 f.write(binary_data)
         except Exception as e:

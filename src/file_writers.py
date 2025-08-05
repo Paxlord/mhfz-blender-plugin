@@ -869,25 +869,48 @@ def _write_aan_motion_block(motion: AANMotion) -> bytes:
     
     return header + bone_tracks_buffer
 
-def write_aan_package(aan_package: AANPackage) -> bytes:
+def write_aan_package(aan_package: AANPackage, animation_type: str = "player") -> bytes:
     if not aan_package.motions:
         return b''
 
-    motions_by_part = {}
+    motions_by_part = defaultdict(list)
     for motion in aan_package.motions:
-        if motion.part_index not in motions_by_part:
-            motions_by_part[motion.part_index] = []
         motions_by_part[motion.part_index].append(motion)
 
-    num_parts = max(motions_by_part.keys()) + 1 if motions_by_part else 0
+    MIN_MOTION_SLOTS = 100
+    part_slot_counts = defaultdict(lambda: MIN_MOTION_SLOTS)
 
-    MOTION_SLOT_COUNT = 100
+    for part_idx, motions in motions_by_part.items():
+        if not motions:
+            continue
+        max_slot_in_part = max(m.motion_slot_index for m in motions)
+        part_slot_counts[part_idx] = max(max_slot_in_part + 1, MIN_MOTION_SLOTS)
+
+    num_parts = 0
+    if motions_by_part:
+        max_part_index = max(motions_by_part.keys())
+        if animation_type == "monster":
+            num_parts = (max_part_index // 2) * 2 + 2
+        else:
+            num_parts = max_part_index + 1
+
     part_offset_tables = {}
     offset_tables_total_size = 0
+    
     for i in range(num_parts):
-        if i in motions_by_part:
-            part_offset_tables[i] = [0xFFFFFFFF] * MOTION_SLOT_COUNT
-            offset_tables_total_size += MOTION_SLOT_COUNT * 4
+        if animation_type == "monster":
+            pair_base = (i // 2) * 2
+            pair_has_data = (pair_base in motions_by_part) or (pair_base + 1 in motions_by_part)
+            
+            if pair_has_data:
+                slot_count = part_slot_counts[i] 
+                part_offset_tables[i] = [0xFFFFFFFF] * slot_count
+                offset_tables_total_size += slot_count * 4
+        else:
+            if i in motions_by_part:
+                slot_count = part_slot_counts[i]
+                part_offset_tables[i] = [0xFFFFFFFF] * slot_count
+                offset_tables_total_size += slot_count * 4
 
     part_header_array_size = num_parts * 8
     motion_data_start_offset = part_header_array_size + offset_tables_total_size
@@ -899,7 +922,7 @@ def write_aan_package(aan_package: AANPackage) -> bytes:
     for part_idx in sorted_part_indices:
         sorted_motions = sorted(motions_by_part[part_idx], key=lambda m: m.motion_slot_index)
         for motion in sorted_motions:
-            if motion.motion_slot_index < MOTION_SLOT_COUNT:
+            if motion.motion_slot_index < len(part_offset_tables[part_idx]):
                 part_offset_tables[part_idx][motion.motion_slot_index] = current_motion_offset
                 
                 motion_block_bytes = _write_aan_motion_block(motion)
@@ -911,10 +934,11 @@ def write_aan_package(aan_package: AANPackage) -> bytes:
     
     current_table_offset = part_header_array_size
     for i in range(num_parts):
-        if i in motions_by_part:
-            final_buffer.extend(write_uint32_le(MOTION_SLOT_COUNT))
+        if i in part_offset_tables:
+            slot_count = len(part_offset_tables[i])
+            final_buffer.extend(write_uint32_le(slot_count))
             final_buffer.extend(write_uint32_le(current_table_offset))
-            current_table_offset += MOTION_SLOT_COUNT * 4
+            current_table_offset += slot_count * 4
         else:
             final_buffer.extend(write_uint32_le(0))
             final_buffer.extend(write_uint32_le(0))
