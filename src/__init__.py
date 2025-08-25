@@ -17,17 +17,22 @@ from . import ui_panels
 classes = (
     ImportFMOD,
     ExportFMOD,
+    ImportAAN,
+    ExportAAN, 
     ui_panels.FMOD_SetupProperties,
     ui_panels.FMOD_OT_SetupMesh, 
+    ui_panels.FMOD_OT_ImportPlayerBase, 
     ui_panels.FMOD_PT_SetupPanel,
 
 )
 
 def menu_func_import(self, context):
     self.layout.operator(import_operators.ImportFMOD.bl_idname, text="FMOD (.fmod)")
+    self.layout.operator(ImportAAN.bl_idname, text="MHFZ Animation (.bin)")
 
 def menu_func_export(self, context):
     self.layout.operator(export_operators.ExportFMOD.bl_idname, text="FMOD (.fmod)")
+    self.layout.operator(ExportAAN.bl_idname, text="MHFZ Animation (.bin)")
     pass
 
 def register():

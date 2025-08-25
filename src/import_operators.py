@@ -1,10 +1,15 @@
 import bpy #type: ignore
 import bpy_extras.io_utils #type: ignore
 import os
+import math
 
 from .data_classes import ParsedFMODData, ParsedFSKLData
 from .file_parsers import *
 from .model_utils import *
+
+def maya_to_blender_transform(obj: bpy.types.Object):
+    obj.scale = (0.01, 0.01, 0.01)
+    obj.rotation_euler = (math.radians(90), 0, 0)
 
 def find_texture_folder(fmod_path: str, manual_path: str = "") -> str:
     def contains_images(folder_path: str) -> bool:
@@ -92,7 +97,6 @@ def find_fskl_file(fmod_path: str) -> str:
     return None
 
 class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
-    """Import FMOD model"""
     bl_idname = "import_scene.fmod"
     bl_label = "Import FMOD"
     bl_options = {'REGISTER', 'UNDO'}
@@ -186,8 +190,65 @@ class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
                     parent_mesh_to_armature(mesh_obj, armature_obj)
                 print("Parented meshes to armature successfully")
 
+            if armature_obj:
+                maya_to_blender_transform(armature_obj)
+            else:
+                for mesh_obj in mesh_objects:
+                    maya_to_blender_transform(mesh_obj)
+
         except Exception as e:
             self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+
+        return {'FINISHED'}
+    
+class ImportAAN(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
+    bl_idname = "import_scene.aan"
+    bl_label = "Import MHFZ Animation"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filter_glob: bpy.props.StringProperty(
+        default="*.bin",
+        options={'HIDDEN'},
+        maxlen=255,
+    ) # type: ignore
+
+    animation_type: bpy.props.EnumProperty(
+        name="Animation Type",
+        description="Type of animation system to use",
+        items=[
+            ('monster', "Monster", "Use monster animation system (paired parts)"),
+            ('player', "Player", "Use player animation system (upper/lower body split)"),
+        ],
+        default='monster',
+    ) # type: ignore
+
+    model_scale: bpy.props.FloatProperty(
+        name="Model Scale",
+        description="The global scale factor used when importing the model/skeleton (e.g., 0.01)",
+        default=1.0, 
+    ) # type: ignore
+
+    def execute(self, context):
+        active_obj = context.view_layer.objects.active
+        if not active_obj or active_obj.type != 'ARMATURE':
+            self.report({'ERROR'}, "Please select an armature object first.")
+            return {'CANCELLED'}
+
+        try:
+            print(f"Parsing animation data from: {self.filepath}")
+            aan_package = parse_aan_package(self.filepath)
+            print(f"Found {len(aan_package.motions)} total motion variations (Part/Slot combos).")
+            
+            apply_animation_to_armature(active_obj, aan_package, self.model_scale, self.animation_type)
+            
+            print("Successfully applied animation data.")
+
+
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to import animation: {e}")
+            import traceback
+            traceback.print_exc()
             return {'CANCELLED'}
 
         return {'FINISHED'}

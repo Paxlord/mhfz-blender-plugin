@@ -356,9 +356,9 @@ def fskl_data_from_armature(armature: bpy.types.Object) -> ParsedFSKLData:
         else:
             position_vec = bone.head_local
 
-        unknown_bone_param = 0
-        if "unknown_bone_param" in bone:
-            unknown_bone_param = bone["unknown_bone_param"]
+        part_id = 0
+        if "part_id" in bone:
+            part_id = bone["part_id"]
 
         bone_data = ParsedBoneData(
             node_id=node_id,
@@ -372,7 +372,7 @@ def fskl_data_from_armature(armature: bpy.types.Object) -> ParsedFSKLData:
             translation=(position_vec.x, position_vec.y, position_vec.z),
             transform_flags=1.0,
             unk_int=0xFFFFFFFF,
-            unknown_bone_param=unknown_bone_param,
+            part_id=part_id,
             unk_data=bytes([0] * 184)
         )
         fskl_data.bones.append(bone_data)
@@ -633,7 +633,7 @@ def write_bone_block(bone_data: ParsedBoneData) -> bytes:
     data.extend(write_float_le(bone_data.translation[2]))
     data.extend(write_float_le(bone_data.transform_flags))
     data.extend(write_uint32_le(bone_data.unk_int))
-    data.extend(write_uint32_le(bone_data.unknown_bone_param))
+    data.extend(write_uint32_le(bone_data.part_id))
     data.extend(bone_data.unk_data)
     return data
 
@@ -787,3 +787,167 @@ def material_and_texture_data_from_material(material: bpy.types.Material, image_
     )
 
     return parsed_material_data, texture_blocks
+
+
+
+def _write_keyframe_data(keyframe: Keyframe, type_name: str) -> bytes:
+    if type_name == 'LinearFloat':
+        value, time = keyframe.data
+        return write_float_le(value) + write_float_le(time)
+    elif type_name == 'HermiteFloat':
+        value, time, tan_in, tan_out = keyframe.data
+        return write_float_le(value) + write_float_le(time) + write_float_le(tan_in) + write_float_le(tan_out)
+    else:
+        return b''
+
+def _write_aan_component(comp: AANAnimComponent) -> tuple[bytes, int]:
+    keyframe_buffer = bytearray()
+    for key in comp.keyframes:
+        keyframe_buffer.extend(_write_keyframe_data(key, comp.type_name))
+    
+    size_on_disk = 12 + len(keyframe_buffer)
+    
+    type_id = 0
+    if comp.type_name == 'LinearFloat':
+        type_id = 33
+    elif comp.type_name == 'HermiteFloat':
+        type_id = 34
+    
+    channel_flag = CHANNEL_NAME_TO_FLAG_MAP.get(comp.channel_name, 0)
+    
+    flags_type_and_channel = 0x80000000 | (type_id << 16) | channel_flag
+    
+    header = (
+        write_uint32_le(flags_type_and_channel) +
+        write_uint32_le(len(comp.keyframes)) +
+        write_uint32_le(size_on_disk)
+    )
+    
+    return header + keyframe_buffer, channel_flag
+
+def _write_aan_bone_track(track: AANBoneTrack) -> bytes:
+    components_buffer = bytearray()
+    srt_summary_mask = 0
+    
+    sorted_components = sorted(track.components, key=lambda c: CHANNEL_NAME_TO_FLAG_MAP.get(c.channel_name, 0))
+
+    for comp in sorted_components:
+        component_bytes, channel_flag = _write_aan_component(comp)
+        components_buffer.extend(component_bytes)
+        srt_summary_mask |= channel_flag
+        
+    bonetrack_size = 12 + len(components_buffer)
+    flags_and_srt_mask = 0x80000000 | srt_summary_mask
+
+    header = (
+        write_uint32_le(flags_and_srt_mask) +
+        write_uint32_le(len(track.components)) +
+        write_uint32_le(bonetrack_size)
+    )
+    
+    return header + components_buffer
+
+def _write_aan_motion_block(motion: AANMotion) -> bytes:
+    bone_tracks_buffer = bytearray()
+    
+    for bone_id in sorted(motion.bone_tracks.keys()):
+        track = motion.bone_tracks[bone_id]
+        bone_tracks_buffer.extend(_write_aan_bone_track(track))
+        
+    block_size = 20 + len(bone_tracks_buffer)
+    
+    flags_and_mode = 0x80000000 | 1
+    loop_flag = 1 if motion.loops else 0
+    
+    header = (
+        write_uint32_le(flags_and_mode) +
+        write_uint32_le(len(motion.bone_tracks)) +
+        write_uint32_le(block_size) +
+        write_uint32_le(loop_flag) +
+        write_float_le(motion.loop_start_frame)
+    )
+    
+    return header + bone_tracks_buffer
+
+def write_aan_package(aan_package: AANPackage, animation_type: str = "player") -> bytes:
+    if not aan_package.motions:
+        return b''
+
+    motions_by_part = defaultdict(list)
+    for motion in aan_package.motions:
+        motions_by_part[motion.part_index].append(motion)
+
+    MIN_MOTION_SLOTS = 100
+    part_slot_counts = defaultdict(lambda: MIN_MOTION_SLOTS)
+
+    for part_idx, motions in motions_by_part.items():
+        if not motions:
+            continue
+        max_slot_in_part = max(m.motion_slot_index for m in motions)
+        part_slot_counts[part_idx] = max(max_slot_in_part + 1, MIN_MOTION_SLOTS)
+
+    num_parts = 0
+    if motions_by_part:
+        max_part_index = max(motions_by_part.keys())
+        if animation_type == "monster":
+            num_parts = (max_part_index // 2) * 2 + 2
+        else:
+            num_parts = max_part_index + 1
+
+    part_offset_tables = {}
+    offset_tables_total_size = 0
+    
+    for i in range(num_parts):
+        if animation_type == "monster":
+            pair_base = (i // 2) * 2
+            pair_has_data = (pair_base in motions_by_part) or (pair_base + 1 in motions_by_part)
+            
+            if pair_has_data:
+                slot_count = part_slot_counts[i] 
+                part_offset_tables[i] = [0xFFFFFFFF] * slot_count
+                offset_tables_total_size += slot_count * 4
+        else:
+            if i in motions_by_part:
+                slot_count = part_slot_counts[i]
+                part_offset_tables[i] = [0xFFFFFFFF] * slot_count
+                offset_tables_total_size += slot_count * 4
+
+    part_header_array_size = num_parts * 8
+    motion_data_start_offset = part_header_array_size + offset_tables_total_size
+
+    motion_data_buffer = bytearray()
+    current_motion_offset = motion_data_start_offset
+    
+    sorted_part_indices = sorted(motions_by_part.keys())
+    for part_idx in sorted_part_indices:
+        sorted_motions = sorted(motions_by_part[part_idx], key=lambda m: m.motion_slot_index)
+        for motion in sorted_motions:
+            if motion.motion_slot_index < len(part_offset_tables[part_idx]):
+                part_offset_tables[part_idx][motion.motion_slot_index] = current_motion_offset
+                
+                motion_block_bytes = _write_aan_motion_block(motion)
+                
+                motion_data_buffer.extend(motion_block_bytes)
+                current_motion_offset += len(motion_block_bytes)
+
+    final_buffer = bytearray()
+    
+    current_table_offset = part_header_array_size
+    for i in range(num_parts):
+        if i in part_offset_tables:
+            slot_count = len(part_offset_tables[i])
+            final_buffer.extend(write_uint32_le(slot_count))
+            final_buffer.extend(write_uint32_le(current_table_offset))
+            current_table_offset += slot_count * 4
+        else:
+            final_buffer.extend(write_uint32_le(0))
+            final_buffer.extend(write_uint32_le(0))
+            
+    for i in range(num_parts):
+        if i in part_offset_tables:
+            for offset in part_offset_tables[i]:
+                final_buffer.extend(write_uint32_le(offset))
+
+    final_buffer.extend(motion_data_buffer)
+    
+    return bytes(final_buffer)

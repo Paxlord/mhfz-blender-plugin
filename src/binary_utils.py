@@ -18,6 +18,9 @@ def write_uint32_le(value: int) -> bytes:
 def write_uint16_le(value: int) -> bytes:
     return struct.pack("<H", value)
 
+def write_int16_le(value: int) -> bytes:
+    return struct.pack("<h", value)
+
 def write_uint8(value: int) -> bytes:
     return struct.pack("<B", value)
 
