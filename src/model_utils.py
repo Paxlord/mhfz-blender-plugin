@@ -1,6 +1,5 @@
-import bpy
-from numpy import mat #type: ignore
-from mathutils import Matrix, Vector #type: ignore
+import bpy # type: ignore
+from mathutils import Vector #type: ignore
 from collections import defaultdict, deque
 
 from .sgi_strips import *
