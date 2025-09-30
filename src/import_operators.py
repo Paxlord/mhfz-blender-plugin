@@ -107,17 +107,24 @@ class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
         maxlen=255,
     ) # type: ignore
 
+    no_textures: bpy.props.BoolProperty(
+        name="No Textures",
+        description="Import model without textures",
+        default=False,
+    ) # type: ignore
+
     def execute(self, context):
         
         filepath = self.filepath
-        texture_folder = find_texture_folder(filepath, "")
+
+        if not self.no_textures:
+            texture_folder = find_texture_folder(filepath, "")
+            if not texture_folder:
+                self.report({'ERROR'}, "Texture folder not found. If the model has no textures, use the 'No Textures' option.")
+                return {'CANCELLED'}
+
         skeleton_path = find_fskl_file(filepath)
 
-        if not texture_folder:
-            self.report({'ERROR'}, "Texture folder not found. Please ensure the texture folder is in the same directory as the FMOD file.")
-            return {'CANCELLED'}
-
-        
         try:
             print("Importing FMOD model from testestest:", filepath)
 
@@ -150,7 +157,9 @@ class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
                 print(f"Parsed skeleton data: {len(parsed_skeleton_data.bones)} bones")
 
             
-            texture_dic = load_texture_no_dupes(parsed_fmod_data, texture_folder)
+            texture_dic = {}
+            if not self.no_textures and texture_folder:
+                texture_dic = load_texture_no_dupes(parsed_fmod_data, texture_folder)
 
             blender_materials = []
             for i, material in enumerate(parsed_fmod_data.materials):
