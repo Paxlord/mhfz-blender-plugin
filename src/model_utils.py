@@ -273,7 +273,8 @@ def create_blender_mesh(obj_name: str, mesh_name: str, parsed_data: ParsedMeshDa
     return obj
 
 def create_blender_material(mat_name: str, parsed_material: ParsedMaterialData, texture_dic: dict[int, bpy.types.Image]):
-    mat_name = f"Mat_{mat_name}"
+    if not mat_name.lower().startswith("mat_skin"):
+        mat_name = f"Mat_{mat_name}"
     mat = bpy.data.materials.new(name=mat_name)
     mat.use_nodes = True
 
