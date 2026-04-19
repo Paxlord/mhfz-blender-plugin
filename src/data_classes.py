@@ -54,7 +54,6 @@ class ParsedMaterialData:
     texture_diffuse: int | None = None
     texture_normal: int | None = None
     texture_specular: int | None = None
-    is_skin: bool = False
 
 @dataclass
 class ParsedFMODData:

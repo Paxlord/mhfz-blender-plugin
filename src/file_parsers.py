@@ -393,22 +393,34 @@ def parse_directory(buf, off, fmod_data: ParsedFMODData):
         texture_data = parse_texture_directory(buf, off)
         fmod_data.textures.extend(texture_data)
 
-def load_texture_no_dupes(parsed_fmod_data, texture_folder):
+def load_texture_no_dupes(parsed_fmod_data, texture_folder, skin_sex="f"):
     image_extensions = {'.png', '.jpg', '.jpeg', '.tga', '.dds', '.bmp', '.tiff'}
-    files = sorted([f for f in os.listdir(texture_folder) 
-                   if os.path.isfile(os.path.join(texture_folder, f)) 
+    files = sorted([f for f in os.listdir(texture_folder)
+                   if os.path.isfile(os.path.join(texture_folder, f))
                    and os.path.splitext(f.lower())[1] in image_extensions])
-    
+
     file_to_image = {}
     texture_dic = {}
-    
+    skin_block_indices = set()
+    skin_image = None
+
     for i, texture in enumerate(parsed_fmod_data.textures):
         if texture.image_idx >= len(files):
-            print(f"Warning: texture.image_idx {texture.image_idx} is out of range for {len(files)} image files")
+            skin_block_indices.add(i)
+            if skin_image is None:
+                script_dir = os.path.dirname(__file__)
+                skin_path = os.path.join(script_dir, "templates", f"{skin_sex}_skin.png")
+                try:
+                    skin_image = bpy.data.images.load(skin_path)
+                    print(f"Loaded skin texture: {skin_image.name} from {skin_path}")
+                except Exception as e:
+                    print(f"Failed to load skin texture {skin_path}: {e}")
+                    continue
+            texture_dic[i] = skin_image
             continue
-            
+
         file_path = os.path.join(texture_folder, files[texture.image_idx])
-        
+
         try:
             if file_path not in file_to_image:
                 img = bpy.data.images.load(file_path)
@@ -417,9 +429,9 @@ def load_texture_no_dupes(parsed_fmod_data, texture_folder):
             else:
                 img = file_to_image[file_path]
                 print(f"Reusing texture: {img.name} for slot {i}")
-            
+
             texture_dic[i] = img
-            
+
         except Exception as e:
             print(f"Failed to load texture {file_path}: {e}")
             continue
@@ -430,7 +442,7 @@ def load_texture_no_dupes(parsed_fmod_data, texture_folder):
     print(f"  - {len(set(texture_dic.values()))} unique image objects")
     print(f"  - Found {len(files)} image files in folder")
     
-    return texture_dic
+    return texture_dic, skin_block_indices
 
 def parse_aan_package(filepath):
     KEYFRAME_PROPERTIES = {

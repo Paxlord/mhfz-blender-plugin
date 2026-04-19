@@ -158,18 +158,16 @@ class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
 
             
             texture_dic = {}
+            skin_block_indices = set()
             if not self.no_textures and texture_folder:
-                texture_dic = load_texture_no_dupes(parsed_fmod_data, texture_folder)
+                folder_name = os.path.basename(os.path.normpath(texture_folder)).lower()
+                skin_sex = "m" if folder_name.startswith("m_") else "f"
+                texture_dic, skin_block_indices = load_texture_no_dupes(parsed_fmod_data, texture_folder, skin_sex)
 
             blender_materials = []
-            total_textures = len(parsed_fmod_data.textures)
             for i, material in enumerate(parsed_fmod_data.materials):
-                is_skin = material.texture_diffuse is not None and material.texture_diffuse >= total_textures
-                if is_skin:
-                    material.texture_diffuse = None
-                    mat_name = f"mat_skin_{i}"
-                else:
-                    mat_name = f"Material_{i}"
+                is_skin_mat = material.texture_diffuse in skin_block_indices
+                mat_name = f"mat_skin_{i}" if is_skin_mat else f"Material_{i}"
                 blender_material = create_blender_material(mat_name, material, texture_dic)
                 if blender_material:
                     blender_materials.append(blender_material)

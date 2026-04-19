@@ -79,9 +79,32 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         all_texture_data = []
         material_names = []
         global_texture_count = 0
+        skin_block_idx = None
 
         for material, idx in sorted(materials.items(), key=lambda item: item[1]):
             material_names.append(material.name)
+            if material.name.lower().startswith("mat_skin"):
+                if skin_block_idx is None:
+                    all_texture_data.append(ParsedTextureData(
+                        image_idx=len(image_dict),
+                        width=64,
+                        height=64,
+                        data=bytes([0] * 244),
+                    ))
+                    skin_block_idx = global_texture_count
+                    global_texture_count += 1
+                materials_data.append(ParsedMaterialData(
+                    ambient_rgba=(0.3, 0.3, 0.3, 0.0),
+                    diffuse_rgba=(1.0, 1.0, 1.0, 1.0),
+                    specular_rgba=(1.0, 1.0, 1.0, 0.0),
+                    specular_str=50.0,
+                    texture_count=1,
+                    unknown_data=bytes([0] * 200),
+                    texture_diffuse=skin_block_idx,
+                ))
+                print(f"Material '{material.name}': skin reference -> texture block {skin_block_idx}")
+                continue
+
             material_data, texture_blocks = material_and_texture_data_from_material(material, image_dict, global_texture_count, self.force_texture_resize)
             materials_data.append(material_data)
             all_texture_data.extend(texture_blocks)

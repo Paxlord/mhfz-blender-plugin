@@ -485,12 +485,15 @@ def collect_unique_images(context):
             if not mat_slots.material or not mat_slots.material.use_nodes:
                 continue
 
+            if mat_slots.material.name.lower().startswith("mat_skin"):
+                continue
+
             for node in mat_slots.material.node_tree.nodes:
                 if node.type == 'TEX_IMAGE' and node.image:
                     if node.image not in unique_images:
                         unique_images[node.image] = image_idx
                         image_idx += 1
-    
+
     return unique_images
 
 def extract_tpn_for_export(mesh_obj: bpy.types.Object) -> list[tuple[float, float, float, float]]:

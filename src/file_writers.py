@@ -665,10 +665,7 @@ def write_fmod(parsed_data: ParsedFMODData) -> None:
             meshes_block.append(mesh_data)
 
     if parsed_data.materials:
-        total_textures = len(parsed_data.textures) if parsed_data.textures else 0
         for material in parsed_data.materials:
-            if material.is_skin:
-                material.texture_diffuse = total_textures
             material_data = write_material(material)
             materials_block.append(material_data)
 
@@ -775,8 +772,7 @@ def material_and_texture_data_from_material(material: bpy.types.Material, image_
     ambient_rgba = (0.3, 0.3, 0.3, 0.0)
     specular_str = 50.0
 
-    is_skin = material.name.lower().startswith("mat_skin")
-    texture_count = len(texture_blocks) + (1 if is_skin else 0)
+    texture_count = len(texture_blocks)
 
     parsed_material_data = ParsedMaterialData(
         ambient_rgba=ambient_rgba,
@@ -787,8 +783,7 @@ def material_and_texture_data_from_material(material: bpy.types.Material, image_
         unknown_data=bytes([0] * 200),
         texture_diffuse=global_texture_indices.get('diffuse'),
         texture_normal=global_texture_indices.get('normal'),
-        texture_specular=global_texture_indices.get('specular'),
-        is_skin=is_skin,
+        texture_specular=global_texture_indices.get('specular')
     )
 
     return parsed_material_data, texture_blocks
