@@ -162,8 +162,14 @@ class ImportFMOD(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
                 texture_dic = load_texture_no_dupes(parsed_fmod_data, texture_folder)
 
             blender_materials = []
+            total_textures = len(parsed_fmod_data.textures)
             for i, material in enumerate(parsed_fmod_data.materials):
-                mat_name = f"Material_{i}"
+                is_skin = material.texture_diffuse is not None and material.texture_diffuse >= total_textures
+                if is_skin:
+                    material.texture_diffuse = None
+                    mat_name = f"mat_skin_{i}"
+                else:
+                    mat_name = f"Material_{i}"
                 blender_material = create_blender_material(mat_name, material, texture_dic)
                 if blender_material:
                     blender_materials.append(blender_material)
