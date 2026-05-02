@@ -69,6 +69,9 @@ class ExportFMOD(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
 
     def execute(self, context):
 
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
         image_dict = collect_unique_images(context)
         print(f"Collected {len(image_dict)} unique images from the scene")
 
